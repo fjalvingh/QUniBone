@@ -1,5 +1,6 @@
 #include "11.h"
 #include "ka11.h"
+#include <stdlib.h>
 
 #include "gpios.hpp" // ARM_DEBUG_PIN*
 
@@ -11,7 +12,6 @@ void unibone_prioritylevelchange(uint8_t level);
 void unibone_bus_init() ;
 
 bool unibone_trace_addr(uint16_t a) ;
-
 
 int
 dati_bus(Bus *bus)
