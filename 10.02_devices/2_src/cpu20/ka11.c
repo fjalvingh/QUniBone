@@ -838,7 +838,7 @@ be:	if(cpu->be > 1){
 	TRAP(4);
 
 trap:
-	if (unibone_trace_addr(PC-2)) 
+	if (unibone_trace_addr(PC-2))
 	trace("TRAP %o\n", TV);
 	PUSH; OUT(SP, PSW);
 	PUSH; OUT(SP, PC);
