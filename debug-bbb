@@ -1,0 +1,36 @@
+#!/bin/bash
+# Start gdbserver on a BeagleBone Black, attached to the already-deployed
+# "demo" binary (see ./deploy-bbb). Meant to be run as a VS Code background
+# task, with a cppdbg session then attaching via miDebuggerServerAddress.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+CROSSCOMPILE_ENV="$SCRIPT_DIR/crosscompile.env"
+if [ ! -f "$CROSSCOMPILE_ENV" ]; then
+  echo "Error: $CROSSCOMPILE_ENV not found. Run ./crossco once to create and configure it." >&2
+  exit 1
+fi
+. "$CROSSCOMPILE_ENV"
+
+if [ -z "$BBB_HOST" ]; then
+  echo "Error: BBB_HOST is not set in $CROSSCOMPILE_ENV." >&2
+  echo "Set it to the BeagleBone's hostname or IP address (see crosscompile.env.example)." >&2
+  exit 1
+fi
+
+case "$QUNIBONE_PLATFORM" in
+  UNIBUS) QUNIBONE_PLATFORM_SUFFIX=_u ;;
+  QBUS)   QUNIBONE_PLATFORM_SUFFIX=_q ;;
+  *)
+    echo "Error: QUNIBONE_PLATFORM in $CROSSCOMPILE_ENV must be set to UNIBUS or QBUS (got '$QUNIBONE_PLATFORM')." >&2
+    exit 1
+    ;;
+esac
+
+GDBSERVER_PORT="${GDBSERVER_PORT:-2345}"
+RELATIVE_DIR="10.03_app_demo/4_deploy$QUNIBONE_PLATFORM_SUFFIX"
+
+echo "Starting gdbserver on root@$BBB_HOST:$GDBSERVER_PORT ($RELATIVE_DIR/demo)"
+# -t allocates a remote tty so gdbserver's process group receives SIGHUP/SIGTERM
+# and exits cleanly when VS Code stops this task; exec replaces this script
+# with ssh so VS Code is killing/watching a single process, not a shell tree.
+exec ssh -t "root@$BBB_HOST" "cd ~/$RELATIVE_DIR && gdbserver :$GDBSERVER_PORT ./demo --verbose"

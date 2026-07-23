@@ -34,7 +34,12 @@ To build:
 ./crossco          # incremental build
 ./crossco -a       # full rebuild (`make clean` first)
 ./crossco -c       # (re)generate compile_commands.json for IDE code completion
+./crossco -r       # release build (-O3, no debug symbols) instead of the default debug build
 ```
+
+By default `crossco` builds with debug symbols (`-ggdb3 -O0`), so the resulting `demo` is ready for
+remote debugging (e.g. with `gdbserver` on the BeagleBone) without an extra step. Pass `-r` for an
+optimized release build instead.
 
 The first run creates `crosscompile.env` from the committed `crosscompile.env.example` template
 and stops, asking you to edit it: uncomment `QUNIBONE_PLATFORM=UNIBUS` or `=QBUS`, and set
@@ -67,3 +72,65 @@ BBB lays out the QUniBone tree directly under root's home directory (see `qunibo
 
 Set `BBB_HOST` in your `crosscompile.env` to the device's hostname or IP address (reachable via
 `ssh`/`scp` as `root`) before running it; `deploy-bbb` reports an error if it's missing.
+
+### Remote debugging from VS Code
+
+```bash
+./debug-bbb
+```
+
+Starts `gdbserver` on the BeagleBone (over the same `ssh` connection `deploy-bbb` uses), attached to
+the binary already deployed there. It listens on `GDBSERVER_PORT` (optional in `crosscompile.env`,
+defaults to `2345`). Since `demo` is statically linked (see `makefile_u`/`makefile_q`), there's no
+sysroot or library-path setup needed on the debugger side — just a matching `gdb` (e.g. the one
+shipped alongside your `GCC_ROOT` cross toolchain, `arm-linux-gnueabihf-gdb`) pointed at that port,
+and a local copy of the same binary for symbols.
+
+`.vscode/` is gitignored (it's local/per-machine, same as `crosscompile.env`), so wire this up once
+per checkout with a `tasks.json` that chains build → deploy → `debug-bbb`, and a `launch.json` that
+runs that chain as a `preLaunchTask` before attaching:
+
+```jsonc
+// .vscode/tasks.json (add alongside your existing build task, e.g. "Build (crossco, incremental)")
+{
+    "label": "Start gdbserver on BBB",
+    "type": "shell",
+    "command": "./debug-bbb",
+    "isBackground": true,
+    "problemMatcher": {
+        "pattern": { "regexp": "^(?:this pattern never matches anything)$" },
+        "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^Starting gdbserver on",
+            "endsPattern": "^Listening on port"
+        }
+    }
+},
+{
+    "label": "Debug: build, deploy & start gdbserver (BBB)",
+    "dependsOrder": "sequence",
+    "dependsOn": ["Build (crossco, incremental)", "Deploy (deploy-bbb)", "Start gdbserver on BBB"]
+}
+```
+
+```jsonc
+// .vscode/launch.json
+{
+    "version": "0.2.0",
+    "configurations": [{
+        "name": "Debug demo on BBB (remote gdbserver)",
+        "type": "cppdbg",
+        "request": "launch",
+        "preLaunchTask": "Debug: build, deploy & start gdbserver (BBB)",
+        "program": "${workspaceFolder}/10.03_app_demo/4_deploy_u/demo",
+        "miDebuggerServerAddress": "<your BBB_HOST>:2345",
+        "miDebuggerPath": "<path to arm-linux-gnueabihf-gdb>",
+        "cwd": "${workspaceFolder}",
+        "MIMode": "gdb"
+    }]
+}
+```
+
+The background task's `endsPattern` matches gdbserver's own `Listening on port` line, so VS Code
+knows the remote debugger is ready before it attaches. With this in place, hitting F5 rebuilds,
+redeploys, starts `gdbserver` on the BBB, and attaches — one step instead of four.

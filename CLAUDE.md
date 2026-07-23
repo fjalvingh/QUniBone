@@ -138,6 +138,10 @@ relative to `$HOME` (e.g. `$HOME/opt/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-g
 actual install locations. Usage: `./crossco` (incremental) or `./crossco -a` (full `make clean`
 rebuild).
 
+`crossco` builds `MAKE_CONFIGURATION=DBG` (`-ggdb3 -O0`, per `makefile_u`/`makefile_q`) by default,
+so the resulting `demo` binary is ready for remote debugging (e.g. gdbserver on the BBB) without an
+extra step. Pass `-r` for an optimized `RELEASE` build (`-O3`, no `-g`) instead.
+
 `./crossco -c` (re)generates `compile_commands.json` at the repo root by wrapping the build in
 `bear --output compile_commands.json -- make` (requires `bear`; errors clearly if it's not
 installed) — this is what IDE tooling (e.g. VS Code's cpptools) reads for accurate include
@@ -153,7 +157,9 @@ successful build (PRU0/PRU1 `clpru` firmware + ARM `demo` link), auto-generation
 `compile_commands.json` on first run (82 entries, matching a manually-`bear`-wrapped build),
 leaving it untouched on a subsequent plain run, forced regeneration via `-c`, and the usage error
 for an unrecognized flag all behave as intended; only pre-existing
-`-Wimplicit-fallthrough`/unused-variable warnings appear during compilation, no errors.
+`-Wimplicit-fallthrough`/unused-variable warnings appear during compilation, no errors. Re-verified
+same day after the DBG-by-default/`-r` change: a plain `./crossco -a` compiles with `-ggdb3 -O0`
+and links a `demo` with debug info; `./crossco -a -r` compiles with `-O3` instead.
 
 Note: `qunibone-platform.env` (used by `compile.sh` for on-device builds) and `crosscompile.env`
 (used by `crossco`) are two separate, independent files that both happen to configure
