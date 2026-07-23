@@ -51,3 +51,19 @@ For IDE code completion (e.g. VS Code's C/C++ extension), `crossco` can generate
 exact include paths and defines. This happens automatically the first time you build, if
 `compile_commands.json` doesn't exist yet; run `./crossco -c` any time afterwards to regenerate it
 (e.g. after adding or removing source files).
+
+### Deploying the build to a BeagleBone Black
+
+Since the PRU0/PRU1 firmware is linked into `demo` as C arrays at build time, `demo` is the only
+file that needs to reach the device — there's nothing else to copy.
+
+```bash
+./deploy-bbb
+```
+
+This copies the built binary to `root@$BBB_HOST:~/10.03_app_demo/4_deploy_u/demo` (or `4_deploy_q`
+for QBUS) over `scp`, mirroring the same path the file has locally — this matches how an installed
+BBB lays out the QUniBone tree directly under root's home directory (see `qunibone-platform.sh`).
+
+Set `BBB_HOST` in your `crosscompile.env` to the device's hostname or IP address (reachable via
+`ssh`/`scp` as `root`) before running it; `deploy-bbb` reports an error if it's missing.

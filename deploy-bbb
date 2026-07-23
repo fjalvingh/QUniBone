@@ -1,0 +1,45 @@
+#!/bin/bash
+# Copy the built "demo" binary to a BeagleBone Black over scp.
+# On the BBB the QUniBone tree is laid out directly under root's home
+# directory (see qunibone-platform.sh), so the target path mirrors the
+# local repo layout: 10.03_app_demo/4_deploy_u|q/demo under ~root.
+echo "Deploying demo binary to BeagleBone Black"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+CROSSCOMPILE_ENV="$SCRIPT_DIR/crosscompile.env"
+if [ ! -f "$CROSSCOMPILE_ENV" ]; then
+  echo "Error: $CROSSCOMPILE_ENV not found. Run ./crossco once to create and configure it." >&2
+  exit 1
+fi
+. "$CROSSCOMPILE_ENV"
+
+if [ -z "$BBB_HOST" ]; then
+  echo "Error: BBB_HOST is not set in $CROSSCOMPILE_ENV." >&2
+  echo "Set it to the BeagleBone's hostname or IP address (see crosscompile.env.example)." >&2
+  exit 1
+fi
+
+case "$QUNIBONE_PLATFORM" in
+  UNIBUS) QUNIBONE_PLATFORM_SUFFIX=_u ;;
+  QBUS)   QUNIBONE_PLATFORM_SUFFIX=_q ;;
+  *)
+    echo "Error: QUNIBONE_PLATFORM in $CROSSCOMPILE_ENV must be set to UNIBUS or QBUS (got '$QUNIBONE_PLATFORM')." >&2
+    exit 1
+    ;;
+esac
+
+RELATIVE_DIR="10.03_app_demo/4_deploy$QUNIBONE_PLATFORM_SUFFIX"
+LOCAL_BINARY="$SCRIPT_DIR/$RELATIVE_DIR/demo"
+
+if [ ! -f "$LOCAL_BINARY" ]; then
+  echo "Error: $LOCAL_BINARY not found. Build it first with ./crossco." >&2
+  exit 1
+fi
+
+echo "Target: root@$BBB_HOST:~/$RELATIVE_DIR/demo"
+
+ssh "root@$BBB_HOST" "mkdir -p ~/$RELATIVE_DIR" || exit 1
+scp "$LOCAL_BINARY" "root@$BBB_HOST:~/$RELATIVE_DIR/demo" || exit 1
+
+echo "Done."
