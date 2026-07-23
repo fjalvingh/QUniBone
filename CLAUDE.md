@@ -136,10 +136,24 @@ failure deep inside `make`/`gcc`. The toolchain paths in `crosscompile.env.examp
 relative to `$HOME` (e.g. `$HOME/opt/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabihf`,
 `$HOME/opt/ti-cgt-pru_2.3.3`) purely as a convenience default; edit `crosscompile.env` for your
 actual install locations. Usage: `./crossco` (incremental) or `./crossco -a` (full `make clean`
-rebuild). Verified 2026-07-23: bootstrap-from-example, the missing/invalid-`QUNIBONE_PLATFORM`
-error, the executable-not-found error (for both a broken `GCC_ROOT` and its derived `BBB_CC`), and
-a full successful build (PRU0/PRU1 `clpru` firmware + ARM `demo` link) all behave as intended; only
-pre-existing `-Wimplicit-fallthrough`/unused-variable warnings appear during compilation, no errors.
+rebuild).
+
+`./crossco -c` (re)generates `compile_commands.json` at the repo root by wrapping the build in
+`bear --output compile_commands.json -- make` (requires `bear`; errors clearly if it's not
+installed) — this is what IDE tooling (e.g. VS Code's cpptools) reads for accurate include
+paths/defines. `-c` implies `-a` (a stale, partially-populated compile database from an incremental
+build is worse than none, since unchanged files get skipped by `make` and wouldn't be captured).
+`crossco` also auto-generates `compile_commands.json` the first time it's missing, even without
+`-c`, so a fresh checkout gets IDE-ready without a separate manual step; once it exists, later plain
+`./crossco`/`./crossco -a` runs leave it untouched.
+
+Verified 2026-07-23: bootstrap-from-example, the missing/invalid-`QUNIBONE_PLATFORM` error, the
+executable-not-found error (for both a broken `GCC_ROOT` and its derived `BBB_CC`), a full
+successful build (PRU0/PRU1 `clpru` firmware + ARM `demo` link), auto-generation of
+`compile_commands.json` on first run (82 entries, matching a manually-`bear`-wrapped build),
+leaving it untouched on a subsequent plain run, forced regeneration via `-c`, and the usage error
+for an unrecognized flag all behave as intended; only pre-existing
+`-Wimplicit-fallthrough`/unused-variable warnings appear during compilation, no errors.
 
 Note: `qunibone-platform.env` (used by `compile.sh` for on-device builds) and `crosscompile.env`
 (used by `crossco`) are two separate, independent files that both happen to configure

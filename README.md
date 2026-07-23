@@ -31,6 +31,7 @@ To build:
 ```bash
 ./crossco          # incremental build
 ./crossco -a       # full rebuild (`make clean` first)
+./crossco -c       # (re)generate compile_commands.json for IDE code completion
 ```
 
 The first run creates `crosscompile.env` from the committed `crosscompile.env.example` template
@@ -41,3 +42,10 @@ after editing — it checks that the configured toolchain binaries actually exis
 and reports clearly if something's missing or misconfigured.
 
 The resulting binary is `10.03_app_demo/4_deploy_u/demo` (or `4_deploy_q` for QBUS).
+
+For IDE code completion (e.g. VS Code's C/C++ extension), `crossco` can generate a
+`compile_commands.json` at the repo root using [`bear`](https://github.com/rizsotto/Bear)
+(`sudo apt install bear`): it wraps the build so every compiler invocation is captured with its
+exact include paths and defines. This happens automatically the first time you build, if
+`compile_commands.json` doesn't exist yet; run `./crossco -c` any time afterwards to regenerate it
+(e.g. after adding or removing source files).
