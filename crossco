@@ -1,0 +1,85 @@
+#!/bin/bash
+# Cross-compile QUniBone for the BeagleBone Black from an x86_64 host.
+# See https://github.com/robamu-org/beaglebone-crosscompiling
+echo "Entering BeagleBoneBlack environment"
+
+ACTION="$1"
+
+# The root of the github repository: wherever this script itself lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+export QUNIBONE_DIR="$SCRIPT_DIR"
+
+# Platform + toolchain settings (QUNIBONE_PLATFORM, GCC_ROOT, PRU_CGT, BBB_CC, ...).
+# crosscompile.env is user-specific and gitignored; bootstrap it from the
+# committed example on first use.
+CROSSCOMPILE_ENV="$SCRIPT_DIR/crosscompile.env"
+CROSSCOMPILE_ENV_EXAMPLE="$SCRIPT_DIR/crosscompile.env.example"
+if [ ! -f "$CROSSCOMPILE_ENV" ]; then
+  cp "$CROSSCOMPILE_ENV_EXAMPLE" "$CROSSCOMPILE_ENV"
+  echo "Created $CROSSCOMPILE_ENV from crosscompile.env.example." >&2
+  echo "Edit it to set QUNIBONE_PLATFORM and your toolchain paths, then run ./crossco again." >&2
+  exit 1
+fi
+. "$CROSSCOMPILE_ENV"
+export QUNIBONE_PLATFORM
+
+# QUNIBONE_PLATFORM_SUFFIX is derived from QUNIBONE_PLATFORM, never set directly.
+case "$QUNIBONE_PLATFORM" in
+  UNIBUS) export QUNIBONE_PLATFORM_SUFFIX=_u ;;
+  QBUS)   export QUNIBONE_PLATFORM_SUFFIX=_q ;;
+  *)
+    echo "Error: QUNIBONE_PLATFORM in $CROSSCOMPILE_ENV must be set to UNIBUS or QBUS (got '$QUNIBONE_PLATFORM')." >&2
+    exit 1
+    ;;
+esac
+
+# Whether it is a RELEASE or a DBG build
+export MAKE_CONFIGURATION=RELEASE
+
+export MAKE_TARGET_ARCH="BBB"
+
+# Validate the toolchain, not just that variables are non-empty: catches a
+# stale or not-yet-edited crosscompile.env with a clear message instead of a
+# confusing failure deep inside make/gcc.
+error=0
+
+require_var() {
+  if [ -z "${!1}" ]; then
+    echo "Error: variable $1 is not set in $CROSSCOMPILE_ENV." >&2
+    error=1
+  fi
+}
+
+require_executable() {
+  # $1 = variable name (for the message), $2 = path that must be an executable file
+  if [ ! -x "$2" ]; then
+    echo "Error: $1 does not point at a valid toolchain: expected executable not found at $2" >&2
+    error=1
+  fi
+}
+
+require_var GCC_ROOT
+require_var PRU_CGT
+require_var BBB_CC
+
+[ -n "$GCC_ROOT" ] && require_executable GCC_ROOT "$GCC_ROOT/bin/arm-linux-gnueabihf-gcc"
+[ -n "$PRU_CGT" ] && require_executable PRU_CGT "$PRU_CGT/bin/clpru"
+if [ -n "$BBB_CC" ]; then
+  # BBB_CC holds "compiler-path plus flags"; only the first word is the executable
+  set -- $BBB_CC
+  require_executable BBB_CC "$1"
+fi
+
+if [ "$error" -ne 0 ]; then
+  echo "Fix the above in $CROSSCOMPILE_ENV and try again." >&2
+  exit 1
+fi
+
+cd "$QUNIBONE_DIR/10.03_app_demo/2_src" || exit 1
+
+if [ "$ACTION" == "-a" ] ; then
+  make clean
+fi
+
+make
+cd ~

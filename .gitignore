@@ -5,6 +5,8 @@ CMakeLists.txt
 
 /.metadata/
 .vscode
+compile_commands.json
+crosscompile.env
 **/4_deploy_u/**
 *.log
 *.swp
