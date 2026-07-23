@@ -27,6 +27,8 @@ You'll need:
   `gcc-linaro-...-arm-linux-gnueabihf` release)
 - the TI PRU Code Generation Tools (`clpru`), used to build the PRU0/PRU1 firmware
 
+See [where to get those toolkits](https://etc.to/pdp-1144/unibone-crosscompile/).
+
 To build:
 ```bash
 ./crossco          # incremental build
