@@ -58,6 +58,9 @@ build order:
   (`application.cpp` + `menu_*.cpp` per topic) used to configure devices, drive the PRUs, and test
   the bus interactively.
 - `10.04_device_exerciser/2_src/` — standalone device test/exerciser harness.
+- `10.05_cputest/` — the CPU emulation core test suite: runs the MAINDEC diagnostics against the
+  `cpu20`/`cpu34` cores on the build machine, with no hardware. `2_src/` is the harness, `3_tapes/`
+  the drop-in directory for further tape images. Bus-independent, so no `_u`/`_q` split.
 - `90_common/src/` — generic utilities shared across the whole tree (logging, getopt, ring buffer,
   string grid, radix conversion) — target-independent.
 - `91_3rd_party/` — vendored PRU compiler/support package (TI PRU CGT, `am335x_pru_package`);
@@ -88,9 +91,12 @@ This is the key thing to understand before touching bus-timing or device-registe
 ## Build
 
 The software is built for BeagleBone hardware — it does not build or run on a generic desktop Linux
-box (it depends on the PRU subsystem, `prussdrv`, and BeagleBone GPIO/pinmux). There is no CI and no
-automated test suite in this repo; verification happens by running the `demo` binary interactively
-on real UniBone/QBone hardware.
+box (it depends on the PRU subsystem, `prussdrv`, and BeagleBone GPIO/pinmux). There is no CI, and
+for everything except the CPU emulation cores verification happens by running the `demo` binary
+interactively on real UniBone/QBone hardware.
+
+The one exception is the **CPU emulation core test suite** in `10.05_cputest/`, which runs on the
+build machine as part of every `./compile.sh` and `./crossco` — see the section below.
 
 Environment setup (once per shell, before building):
 ```bash
@@ -180,6 +186,42 @@ Run the resulting binary:
 
 Adding a new device source file requires adding its `.o` to `$(OBJECTS)` in **both**
 `makefile_u` and `makefile_q` (unless the file itself is bus-specific and only belongs in one).
+
+## CPU emulation core tests (`10.05_cputest`)
+
+The only automated tests in the tree. They run the MAINDEC instruction diagnostics against the CPU
+emulation cores on the build machine, with no BeagleBone and no backplane involved, and both
+`./compile.sh` and `./crossco` run them after a successful build.
+
+This is possible because a core (`cpu20/ka11.c`, `cpu34/kd11ea.c` + `cpu34/kt11d.c`) is plain C
+that reaches the outside world **only** through the ten `unibone_*()` functions of
+`10.02_devices/2_src/cpu_bus_adapter.h`. `cpu.cpp` implements them on top of `qunibusadapter`, the
+PRUs and a real bus; `10.05_cputest/2_src/testbus.cpp` implements the same contract on top of a word
+array plus KL11/KW11 register stubs. Nothing in the cores needs changing to be testable.
+
+- **Host compiler, always.** The makefile uses `HOST_CXX ?= g++` and never `$(BBB_CC)`/`$(CC)`, so
+  under `./crossco` the `demo` binary is cross-compiled for ARM while the tests build and run
+  natively on the x64 host. On the BBB the host compiler *is* the ARM one and the same rules work.
+  It also does `unexport GCC_ROOT`: that variable comes from `crosscompile.env`, and gcc treats a
+  non-empty `GCC_ROOT` as its own install prefix, which makes the host g++ fail to find `stddef.h`.
+- **No `-DARM`.** That is what gives the cores the no-op `ARM_DEBUG_PIN*` of `cpu_debug_pins.h`
+  instead of the real GPIO ones from `gpios.hpp`. `ARM` is set by `OS_CCDEFS` in
+  `makefile_u`/`makefile_q` for every hardware build, so those are unaffected.
+- **Pass criterion**: the diagnostic prints a BEL to the KL11 ("end of pass, no errors"). Failure is
+  a CPU HALT (how a MAINDEC reports an error) or hitting the instruction limit. On failure the run
+  is replayed with tracing armed just before the end and the trace printed — the fake bus is fully
+  deterministic, so the replay is exact.
+- **Stamp driven**: one stamp per (core, tape) under `10.05_cputest/4_deploy/stamps/`, depending on
+  the tape and on the `cputest` binary. An ordinary build re-runs nothing; touching a core or the
+  harness re-runs all pairs (both cores live in one binary, so the granularity is per binary, not
+  per core). A full run is ~80 s serial, ~12 s with `-j`, which is what the build scripts pass.
+- Skip with `./crossco -n` or `SKIP_CPUTESTS=1`.
+
+Adding tapes needs no code change: drop `.BIN` images into `10.05_cputest/3_tapes/both|cpu20|cpu34/`
+and they are picked up by wildcard. The 13 vendored 11/20 diagnostics ZKAAA0…ZKAMA0 are wired in
+from `10.02_devices/2_src/cpu20/pdp11-master/maindec/` and run against both cores. Per-tape
+settings go in a `<tape>.BIN.opt` sidecar. Note the ZKA* set predates the 11/34, so nothing
+currently covers EIS, MFPS/MTPS or the KT11-D — dropping in ZKDA…ZKDJ and ZKTA/ZKTB would.
 
 ## Change log
 

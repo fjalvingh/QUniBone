@@ -12,16 +12,24 @@ COMPILE_COMMANDS="$SCRIPT_DIR/compile_commands.json"
 CLEAN=0
 GENERATE_COMPILE_COMMANDS=0
 BUILD_CONFIGURATION=DBG
+# The CPU core tests run natively on this host, see 10.05_cputest. SKIP_CPUTESTS
+# from the environment does the same as -n.
+RUN_CPUTESTS=1
+if [ -n "$SKIP_CPUTESTS" ] && [ "$SKIP_CPUTESTS" != "0" ]; then
+  RUN_CPUTESTS=0
+fi
 for arg in "$@"; do
   case "$arg" in
     -a) CLEAN=1 ;;
     -c) GENERATE_COMPILE_COMMANDS=1 ;;
     -r) BUILD_CONFIGURATION=RELEASE ;;
+    -n) RUN_CPUTESTS=0 ;;
     *)
-      echo "Usage: $0 [-a] [-c] [-r]" >&2
+      echo "Usage: $0 [-a] [-c] [-r] [-n]" >&2
       echo "  -a  make clean before building (full rebuild)" >&2
       echo "  -c  (re)generate compile_commands.json (for IDE code completion), via 'bear'" >&2
       echo "  -r  release build (-O3, no debug symbols); default is a DBG build (-ggdb3 -O0)" >&2
+      echo "  -n  skip the CPU emulation core tests (same as SKIP_CPUTESTS=1)" >&2
       exit 1
       ;;
   esac
@@ -107,10 +115,13 @@ if [ "$error" -ne 0 ]; then
   exit 1
 fi
 
+CPUTEST_DIR="$QUNIBONE_DIR/10.05_cputest/2_src"
+
 cd "$QUNIBONE_DIR/10.03_app_demo/2_src" || exit 1
 
 if [ "$CLEAN" -eq 1 ] ; then
   make clean
+  make -C "$CPUTEST_DIR" clean
 fi
 
 if [ "$GENERATE_COMPILE_COMMANDS" -eq 1 ]; then
@@ -118,8 +129,18 @@ if [ "$GENERATE_COMPILE_COMMANDS" -eq 1 ]; then
     echo "Error: 'bear' is required to generate compile_commands.json (sudo apt install bear)." >&2
     exit 1
   fi
-  bear --output "$COMPILE_COMMANDS" -- make
+  # Only the ARM build belongs in compile_commands.json: the CPU tests are a
+  # separate, host-compiled make invocation and would contradict its -DARM/-DUNIBUS
+  # entries for the same core sources.
+  bear --output "$COMPILE_COMMANDS" -- make || exit 1
 else
-  make
+  make || exit 1
+fi
+
+# Run the CPU emulation core tests against the MAINDEC diagnostics. Built and run
+# by the HOST compiler, so they work while "demo" is cross compiled for ARM.
+# Stamp driven: this is a no-op unless a CPU core or the harness changed.
+if [ "$RUN_CPUTESTS" -eq 1 ]; then
+  make -C "$CPUTEST_DIR" -j"$(nproc 2>/dev/null || echo 1)" || exit 1
 fi
 cd ~

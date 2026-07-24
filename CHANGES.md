@@ -4,6 +4,70 @@ Notable changes to QUniBone, newest first.
 
 ## Unreleased
 
+### Software tests for the CPU emulation cores
+
+There was no way to exercise either CPU emulation core without a BeagleBone plugged into a live
+backplane, so an instruction set regression could only be found by running `demo` on real hardware.
+The 11/34 core and its brand new KT11-D had never been checked against anything systematic at all.
+
+There is now a test suite that runs the MAINDEC instruction diagnostics against the cores on the
+build machine, as part of every build. It needs no hardware, and it is compiled by the *host*
+compiler, so it also runs during a cross-compile from x64 while `demo` itself is built for ARM.
+
+This works without touching the emulation logic, because a core is plain C which reaches the outside
+world only through the ten `unibone_*()` functions of `10.02_devices/2_src/cpu_bus_adapter.h`.
+`cpu.cpp` implements them on top of `qunibusadapter`, the PRUs and a real bus; the test harness
+implements the same contract on top of a word array and two register stubs.
+
+**New**
+
+- `10.05_cputest/2_src/` (new) — the harness. `testbus.cpp` is the fake QUNIBUS: memory, a KL11
+  whose BEL output is the MAINDEC "end of pass, no errors" signal, a KW11 stub, everything else NXM.
+  `papertape.cpp` reads DEC absolute loader `.BIN` images (ported from `loadpt()` in
+  `cpu20/pdp11-master/1120.c`). `testcore*.cpp` wrap the two cores behind one interface, shaped like
+  the `core_*()` virtuals of `cpu_base_c`. `cputest.cpp` runs one tape against one core.
+  `makefile` builds with `HOST_CXX ?= g++` and drives the runs.
+- `10.05_cputest/3_tapes/{both,cpu20,cpu34}/` (new) — drop-in directories. Any `.BIN` put there is
+  picked up by wildcard on the next build, no makefile edit. The 13 vendored 11/20 diagnostics
+  ZKAAA0…ZKAMA0 are wired in from `10.02_devices/2_src/cpu20/pdp11-master/maindec/` and run against
+  both cores. Per-tape settings (`maxsteps`, `ram-words`, `sw`) go in a `<tape>.BIN.opt` sidecar.
+- `10.02_devices/2_src/cpu_debug_pins.h` (new) — `ARM_DEBUG_PIN*` for the cores. Includes
+  `gpios.hpp` under `#ifdef ARM` (set by `OS_CCDEFS` in `makefile_u`/`makefile_q` for every hardware
+  build) and defines the macros away otherwise, plus `<pthread.h>`, which the cores used to get from
+  `gpios.hpp` by accident. This was the cores' only dependency on the ARM side.
+
+**Changed**
+
+- `10.02_devices/2_src/cpu20/ka11.c`, `cpu34/kd11ea.c` — include `cpu_debug_pins.h` instead of
+  `gpios.hpp`. The ARM objects come out byte-identical, verified with `cmp`.
+- `crossco`, `compile.sh` — run `make -C 10.05_cputest/2_src -j$(nproc)` after a successful build,
+  and clean it on `-a`. Both now abort on a failed build instead of continuing. New `./crossco -n`
+  and `SKIP_CPUTESTS=1` skip the tests.
+- `CLAUDE.md` — new section on the test suite; the claim that the repo has no automated tests is no
+  longer true.
+
+**Notes**
+
+- Judgement: pass = the diagnostic prints a BEL, fail = the CPU halts (how a MAINDEC reports an
+  error) or the instruction limit is reached. On failure the run is replayed with tracing armed just
+  before the end and the trace printed; the fake bus has no threads, clock or randomness, so the
+  replay is exact.
+- Stamp driven, one stamp per (core, tape): an ordinary build re-runs nothing, touching a core or
+  the harness re-runs all pairs. ~80 s serial, ~12 s with `-j`.
+- The test makefile does `unexport GCC_ROOT`. `crosscompile.env` exports it for the ARM toolchain,
+  and gcc treats a non-empty `GCC_ROOT` as its own install prefix, so leaving it set makes the host
+  g++ drop its internal include directory and fail on `stddef.h`.
+- Coverage gap: the ZKA* set predates the 11/34, so nothing yet covers EIS, MFPS/MTPS or the KT11-D.
+  Dropping ZKDA…ZKDJ and ZKTA/ZKTB into `3_tapes/cpu34/` would, with no harness change — the MMU
+  registers are decoded inside the core by `kt11d_read_reg()`/`kt11d_write_reg()`, not on the bus.
+
+**Verified**: cross-compile only, no hardware run. All 13 diagnostics pass against both cores
+(26/26). Checked that the suite detects a regression by deliberately breaking the odd-address DATOB
+byte lane in `testbus.cpp`, which fails ZKACA0/ZKAEA0/ZKAHA0 with a useful trace. Also checked:
+stamp no-op on rebuild, re-run after touching `ka11.c`, drop-in tape pickup, `./crossco -a -c` end
+to end with `compile_commands.json` still ARM-only, `-n`, and `cmp`-identical ARM `ka11.o`/`kd11ea.o`
+before and after the header split.
+
 ### KT11-D memory management for the PDP-11/34
 
 The KD11-EA core was a fork of the 11/20 KA11 and had no memory management, which limited the

@@ -13,7 +13,7 @@
 #include "kd11ea.h"
 #include <stdlib.h>
 
-#include "gpios.hpp" // ARM_DEBUG_PIN*
+#include "cpu_debug_pins.h" // ARM_DEBUG_PIN*, no-ops off the BBB
 
 // unibone_*() declared in cpu_bus_adapter.h, included via 11.h
 
