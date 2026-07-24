@@ -1,12 +1,28 @@
+/* kd11ea.c: PDP-11/34 (KD11-EA) CPU emulation core
+
+ Forked from cpu20/ka11.c, Angelo Papenhoff's KA11 (PDP-11/20).
+ As of the fork this still executes the 11/20 instruction set; search for
+ "TODO 11/34" for what has to be added to make it a real 11/34.
+
+ All symbols are either static or prefixed kd11ea_/KD11EA: this core is linked
+ into the same binary as the KA11 core of the 11/20.
+ */
+
 #include "11.h"
-#include "ka11.h"
+#include "kd11ea.h"
 #include <stdlib.h>
 
 #include "gpios.hpp" // ARM_DEBUG_PIN*
 
 // unibone_*() declared in cpu_bus_adapter.h, included via 11.h
 
-int
+/* CPU features which were options on the 11/20 but are standard on the 11/34.
+   On the 11/20 these are the runtime parameters of cpu20_c. */
+#define KD11EA_EXTENDED_INSTR	1	// EIS: MUL, DIV, ASH, ASHC, XOR, SOB
+#define KD11EA_ALLOW_MXPS	1	// MFPS / MTPS
+#define KD11EA_SWAB_VBIT	1	// SWAB clears the V bit
+
+static int
 dati_bus(Bus *bus)
 {
 	unsigned int data;
@@ -16,19 +32,19 @@ dati_bus(Bus *bus)
 	return 0;
 }
 
-int
+static int
 dato_bus(Bus *bus)
 {
 	return !unibone_dato(bus->addr, bus->data);
 }
 
-int
+static int
 datob_bus(Bus *bus)
 {
 	return !unibone_datob(bus->addr, bus->data);
 }
 
-void
+static void
 levelchange(word psw)
 {
 	unibone_prioritylevelchange(psw>>5);
@@ -59,18 +75,26 @@ enum {
 #define ISSET(f) ((cpu->psw&(f)) != 0)
 
 
-word
+static word
 sgn(word w)
 {
 	return (w>>15)&1;
 }
 
-word
+static word
 sxt(byte b)
 {
 	return (word)(int8_t)b;
 }
 
+// map the 16 bit virtual address to a physical QUNIBUS address.
+// TODO 11/34: this is the place for the KT11-D memory management.
+// When MMR0<0> ("enable relocation") is set, the address has to be relocated
+// through the PAR/PDR pair selected by PSW<15:14> (kernel/user) and the
+// virtual address bits <15:13>, giving an 18 bit physical address, with
+// page length and access checks aborting through vector 250.
+// Without relocation the 11/34 does the same as the 11/20 below: the top 8K
+// of the 16 bit space is mapped to the top 8K of the 18 bit space (IOpage).
 static uint32
 ubxt(word a)
 {
@@ -78,7 +102,7 @@ ubxt(word a)
 }
 
 void
-ka11_tracestate(KA11 *cpu)
+kd11ea_tracestate(KD11EA *cpu)
 {
 	(void)cpu;
 	trace(" R0 %06o R1 %06o R2 %06o R3 %06o R4 %06o R5 %06o R6 %06o R7 %06o\n"
@@ -93,7 +117,7 @@ ka11_tracestate(KA11 *cpu)
 }
 
 void
-ka11_printstate(KA11 *cpu)
+kd11ea_printstate(KD11EA *cpu)
 {
 	(void)cpu;
 	printf(" R0 %06o R1 %06o R2 %06o R3 %06o R4 %06o R5 %06o R6 %06o R7 %06o\n"
@@ -107,27 +131,32 @@ ka11_printstate(KA11 *cpu)
 		cpu->ba, cpu->ir, cpu->psw);
 }
 
-// only to be called from ka11_condstep() thread
+// only to be called from kd11ea_condstep() thread
 void
-ka11_reset(KA11 *cpu)
+kd11ea_reset(KD11EA *cpu)
 {
 	Busdev *bd;
 
 	cpu->traps = 0;
 	cpu->external_intr = 0;
 	cpu->mutex = PTHREAD_MUTEX_INITIALIZER ;
+	// TODO 11/34: clear MMR0..MMR2, disabling relocation.
 
 	for(bd = cpu->bus->devs; bd; bd = bd->next)
 		bd->reset(bd->dev);
 }
 
-int
-dati(KA11 *cpu, int b)
+static int
+dati(KD11EA *cpu, int b)
 {
 	if(!b && cpu->ba&1)
 		goto be;
 
 	/* internal registers */
+	// TODO 11/34: the 11/34 has no PSW at 777776 (use MFPS/MTPS instead),
+	// but it does answer for MMR0..MMR2 (777572..777576) and the PAR/PDR
+	// blocks (772300.. and 777600..). Those are better published as QUNIBUS
+	// registers of cpu34_c, so other bus masters can read them too.
 	if((cpu->ba&0177400) == 0177400){
 		switch(cpu->ba&0377){
 		case 0170: case 0171:
@@ -160,8 +189,8 @@ be:
 	return 1;
 }
 
-int
-dato(KA11 *cpu, int b)
+static int
+dato(KD11EA *cpu, int b)
 {
 if (unibone_trace_addr(cpu->ba)) // default: all
 trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bus->data);
@@ -203,7 +232,7 @@ be:
 }
 
 static void
-svc(KA11 *cpu, Bus *bus)
+svc(KD11EA *cpu, Bus *bus)
 {
 	int l;
 	Busdev *bd;
@@ -224,7 +253,7 @@ svc(KA11 *cpu, Bus *bus)
 }
 
 static int
-addrop(KA11 *cpu, int m, int b)
+addrop(KD11EA *cpu, int m, int b)
 {
 	int r;
 	int ai;
@@ -264,7 +293,7 @@ addrop(KA11 *cpu, int m, int b)
 }
 
 static int
-fetchop(KA11 *cpu, int t, int m, int b)
+fetchop(KD11EA *cpu, int t, int m, int b)
 {
 	int r;
 	r = m&7;
@@ -280,13 +309,13 @@ fetchop(KA11 *cpu, int t, int m, int b)
 }
 
 static int
-readop(KA11 *cpu, int t, int m, int b)
+readop(KD11EA *cpu, int t, int m, int b)
 {
 	return !(addrop(cpu, m, b) == 0 && fetchop(cpu, t, m, b) == 0);
 }
 
 static int
-writedest(KA11 *cpu, word v, int b)
+writedest(KD11EA *cpu, word v, int b)
 {
 	int d;
 	if((cpu->ir & 070) == 0){
@@ -302,15 +331,15 @@ writedest(KA11 *cpu, word v, int b)
 }
 
 static void
-setnz(KA11 *cpu, word w)
+setnz(KD11EA *cpu, word w)
 {
 	cpu->psw &= ~(PSW_N|PSW_Z);
 	if(w & 0100000) cpu->psw |= PSW_N;
 	if(w == 0) cpu->psw |= PSW_Z;
 }
 
-void
-step(KA11 *cpu)
+static void
+step(KD11EA *cpu)
 {
 	uint by;
 	uint br;
@@ -380,13 +409,13 @@ step(KA11 *cpu)
 		pthread_mutex_unlock(&cpu->mutex) ;
 		if (external_intr){
 			//ARM_DEBUG_PIN1(0);	// INTR processed
-			cpu->state = KA11_STATE_RUNNING ;
+			cpu->state = KD11EA_STATE_RUNNING ;
 			TRAP(external_intrvec);
 		}	
 	}
 
 //	if(cpu->r[7] == 016440) {
-//	 	cpu->state = KA11_STATE_HALTED;
+//	 	cpu->state = KD11EA_STATE_HALTED;
 //	 	printf("\nUB BREAKPOINT\n");
 //	 	printf("R0 %06o R1 %06o R2 %06o R3 %06o R4 %06o R5 %06o R6 %06o R7 %06o\n", cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3], cpu->r[4], cpu->r[5], cpu->r[6], cpu->r[7]);
 //	 	printf("ba %06o ir %06o psw %06o\n", cpu->ba, cpu->ir, cpu->psw);
@@ -451,7 +480,7 @@ step(KA11 *cpu)
 
 	case 0070000:
 		reg = (cpu->ir >> 6) & 07;
-    	if(cpu->extended_instr) {
+    	if(KD11EA_EXTENDED_INSTR) {
         	switch(cpu->ir & 0177000) {
               	default:
 		    		printf("-- ext: %o\n", cpu->ir);
@@ -713,7 +742,7 @@ step(KA11 *cpu)
 
 	case 0006400:
 		// mtps
-		if(!cpu->allow_mxps || !by)
+		if(!KD11EA_ALLOW_MXPS || !by)
 			goto ri;
 		TR(MTPS);
 		RD_U;
@@ -726,7 +755,7 @@ step(KA11 *cpu)
 
 	case 0006700:
 		// mfps
-		if(!cpu->allow_mxps || !by)
+		if(!KD11EA_ALLOW_MXPS || !by)
 			goto ri;
 		TR(MFPS);
 		by = 0;
@@ -793,7 +822,7 @@ step(KA11 *cpu)
         }
 	case 0300:	TR(SWAB);
 		RD_U;
-		if(cpu->swab_vbit) {
+		if(KD11EA_SWAB_VBIT) {
 		    CLCV;   // v-bit cleared, ZQKC compatible
 		} else {
 		    CLC;    // v-bit unchanged, actual 11/20 behavior
@@ -805,8 +834,8 @@ step(KA11 *cpu)
 
 	/* Operate */
 	switch(cpu->ir){
-	case 0:	TR(HALT); cpu->state = KA11_STATE_HALTED; return;
-	case 1:	TR(WAIT); cpu->state = KA11_STATE_WAITING; return ; // no traps
+	case 0:	TR(HALT); cpu->state = KD11EA_STATE_HALTED; return;
+	case 1:	TR(WAIT); cpu->state = KD11EA_STATE_WAITING; return ; // no traps
 	case 2:	TR(RTI);
 		BA = SP; POP; IN(PC);
 		BA = SP; POP; IN(PSW);
@@ -814,7 +843,7 @@ step(KA11 *cpu)
 		SVC;
 	case 3:	TR(BPT); TRAP(014);
 	case 4:	TR(IOT); TRAP(020);
-	case 5:	TR(RESET); ka11_reset(cpu); unibone_bus_init() ; SVC;
+	case 5:	TR(RESET); kd11ea_reset(cpu); unibone_bus_init() ; SVC;
 	}
 
 	// All other instructions should be reserved now
@@ -824,7 +853,7 @@ ill:	TRAP(4);
 be:	if(cpu->be > 1){
 		printf("double bus error, HALT\n");
 		trace("double bus error, HALT");
-		cpu->state = KA11_STATE_HALTED;
+		cpu->state = KD11EA_STATE_HALTED;
 		return;
 	}
 	trace("bus error at %06o\n", cpu->ba);
@@ -842,7 +871,7 @@ trap:
 	oldpsw = PSW;
 
 	if (unibone_trace_addr(PC-2)) 
-	ka11_tracestate(cpu);
+	kd11ea_tracestate(cpu);
 	return;		// TODO: is this correct?
 //	SVC;
 
@@ -879,29 +908,29 @@ service:
 // to be called from parallel threads to signal async intr
 // (unibusadapter worker thread)
 void
-ka11_setintr(KA11 *cpu, unsigned vec)
+kd11ea_setintr(KD11EA *cpu, unsigned vec)
 {
 	pthread_mutex_lock(&cpu->mutex) ;
 	cpu->external_intr = true;
 	cpu->external_intrvec = vec;
 	trace("INTR vec=%03o\n", vec) ;
-//	if (cpu->state == KA11_STATE_WAITING) // atomically
-//		cpu->state = KA11_STATE_RUNNING ;
+//	if (cpu->state == KD11EA_STATE_WAITING) // atomically
+//		cpu->state = KD11EA_STATE_RUNNING ;
 	pthread_mutex_unlock(&cpu->mutex) ;
 }
 
-// only to be called from ka11_condstep() thread
+// only to be called from kd11ea_condstep() thread
 
 void
-ka11_pwrfail_trap(KA11 *cpu)
+kd11ea_pwrfail_trap(KD11EA *cpu)
 {
 	cpu->traps |= TRAP_PWR;
 }
 
-// only to be called from ka11_condstep() thread
+// only to be called from kd11ea_condstep() thread
 // if locked, will lock DATI and unibus adapter()!
 void
-ka11_pwrup_vector_fetch(KA11 *cpu)
+kd11ea_pwrup_vector_fetch(KD11EA *cpu)
 {
 	// caller must have issued reset()
 	// cpu->traps &= ~TRAP_PWR; // no, would be a fix
@@ -914,31 +943,22 @@ be:
 }
 
 void
-ka11_condstep(KA11 *cpu)
+kd11ea_condstep(KD11EA *cpu)
 {
-	if(cpu->state == KA11_STATE_RUNNING || cpu->state == KA11_STATE_WAITING)
+	if(cpu->state == KD11EA_STATE_RUNNING || cpu->state == KD11EA_STATE_WAITING)
 		// GRANT Interrupts before opcode fetch, or when CPU is on WAIT
 	unibone_grant_interrupts() ;
 
-	if((cpu->state == KA11_STATE_RUNNING) ||
-	   (cpu->state == KA11_STATE_WAITING && cpu->traps)
-	   || (cpu->state == KA11_STATE_WAITING && cpu->external_intr) ){
-		cpu->state = KA11_STATE_RUNNING;
-		// external_intr WAIT handled atomically in ka11_setintr() !
+	if((cpu->state == KD11EA_STATE_RUNNING) ||
+	   (cpu->state == KD11EA_STATE_WAITING && cpu->traps)
+	   || (cpu->state == KD11EA_STATE_WAITING && cpu->external_intr) ){
+		cpu->state = KD11EA_STATE_RUNNING;
+		// external_intr WAIT handled atomically in kd11ea_setintr() !
 
 		svc(cpu, cpu->bus);
 		step(cpu);
 	}
 }
 
-void
-run(KA11 *cpu)
-{
-	cpu->state = KA11_STATE_RUNNING;
-	
-	while(cpu->state != KA11_STATE_HALTED){
-		ka11_condstep(cpu);
-	}
-
-	ka11_printstate(cpu);
-}
+// ka11.c has a run() here, the driver of the standalone emulator.
+// QUniBone steps the CPU from cpu_base_c::worker() instead.

@@ -1,3 +1,15 @@
+/* 11.h: basic types and macros of the KD11-EA (PDP-11/34) emulation core
+
+ Forked from cpu20/11.h (Angelo Papenhoff), trimmed to what kd11ea.c uses.
+ Kept separate from the 11/20 copy so the two cores can evolve independently;
+ the interface to the ARM side is shared and lives in cpu_bus_adapter.h.
+
+ This header is private to cpu34/: it must never be included together with
+ cpu20/11.h in the same compilation unit.
+ */
+#ifndef _CPU34_11_H_
+#define _CPU34_11_H_
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,15 +38,6 @@ typedef uint32_t uint32;
 
 #define SETMASK(l, r, m) l = (((l)&~(m)) | ((r)&(m)))
 
-
-int hasinput(int fd);
-int dial(char *host, int port);
-void serve(int port, void (*handlecon)(int, void*), void *arg);
-void nodelay(int fd);
-
-word sgn(word w);
-word sxt(byte b);
-
 typedef struct Bus Bus;
 typedef struct Busdev Busdev;
 
@@ -49,7 +52,6 @@ struct Busdev
 	int (*bg)(void *dev);
 	void (*reset)(void *dev);
 };
-void reset_null(void *dev);
 
 struct Bus
 {
@@ -57,30 +59,5 @@ struct Bus
 	uint32 addr;
 	word data;
 };
-int dati_bus(Bus *bus);
-int dato_bus(Bus *bus);
-int datob_bus(Bus *bus);
 
-typedef struct Memory Memory;
-struct Memory
-{
-	word *mem;
-	uint32 start, end;
-};
-int dati_mem(Bus *bus, void *dev);
-int dato_mem(Bus *bus, void *dev);
-int datob_mem(Bus *bus, void *dev);
-
-typedef struct KE11 KE11;
-struct KE11
-{
-	word ac;
-	word mq;
-	word x;
-	byte sc;	/* 6 bits */
-	byte sr;
-};
-int dati_ke11(Bus *bus, void *dev);
-int dato_ke11(Bus *bus, void *dev);
-int datob_ke11(Bus *bus, void *dev);
-void reset_ke11(void *dev);
+#endif

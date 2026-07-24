@@ -64,7 +64,10 @@
 #if defined(UNIBUS)
 #include "m9312.hpp"
 #endif
-#include "cpu.hpp"
+#if defined(UNIBUS)
+#include "cpu20.hpp"
+#include "cpu34.hpp"
+#endif
 
 /*** handle loading of memory content  from macro-11 listing ***/
 static char memory_filename[PATH_MAX + 1];
@@ -178,7 +181,9 @@ void application_c::menu_devices(const char *menu_code, bool with_emulated_CPU)
     //testcontroller_c *test_controller = new testcontroller_c();
 
 #if defined(UNIBUS)
-    cpu_c *cpu = NULL;
+    // all emulated CPU models. Only one of them may be enabled at a time.
+    cpu20_c *cpu20 = NULL;
+    cpu34_c *cpu34 = NULL;
 #endif
     // create RF11 + RS11 drive
     rf11_c *RF11 = new rf11_c();
@@ -242,8 +247,10 @@ void application_c::menu_devices(const char *menu_code, bool with_emulated_CPU)
     ke11_c *KE11A = new ke11_c();
 
     if (with_emulated_CPU) {
-        cpu = new cpu_c();
-        cpu->enabled.set(true);
+        // Instantiate all CPU models, but enable none: the user selects one
+        // with "en <cpuname>". Enabling a 2nd one is refused.
+        cpu20 = new cpu20_c();
+        cpu34 = new cpu34_c();
     }
 #endif
 
@@ -295,6 +302,21 @@ void application_c::menu_devices(const char *menu_code, bool with_emulated_CPU)
             printf("en <dev>             Enable a device\n");
             printf("dis <dev>            Disable device\n");
             printf("sd <dev>             Select \"current device\"\n");
+#if defined(UNIBUS)
+            if (with_emulated_CPU) {
+                unibuscpu_c *active_cpu = NULL;
+                if (cpu20->enabled.value)
+                    active_cpu = cpu20;
+                else if (cpu34->enabled.value)
+                    active_cpu = cpu34;
+                if (active_cpu)
+                    printf("    Emulated CPU is \"%s\" (%s). Only one CPU can be enabled.\n",
+                           active_cpu->name.value.c_str(), active_cpu->type_name.value.c_str());
+                else
+                    printf("    No emulated CPU enabled: use \"en %s\" or \"en %s\" to select one.\n",
+                           cpu20->name.value.c_str(), cpu34->name.value.c_str());
+            }
+#endif
 
             if (cur_device) {
                 printf("p <param> <val>      Set parameter value of current device\n");
@@ -649,8 +671,10 @@ void application_c::menu_devices(const char *menu_code, bool with_emulated_CPU)
 
 #if defined(UNIBUS)
     if (with_emulated_CPU) {
-        cpu->enabled.set(false);
-        delete cpu;
+        cpu20->enabled.set(false);
+        delete cpu20;
+        cpu34->enabled.set(false);
+        delete cpu34;
     }
     m9312->enabled.set(false) ;
     delete m9312 ;

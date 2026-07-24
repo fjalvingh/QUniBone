@@ -181,6 +181,19 @@ Run the resulting binary:
 Adding a new device source file requires adding its `.o` to `$(OBJECTS)` in **both**
 `makefile_u` and `makefile_q` (unless the file itself is bus-specific and only belongs in one).
 
+## Change log
+
+`CHANGES.md` in the repo root is the change log, newest first, with in-flight work under an
+`## Unreleased` heading. **Every major change must get an entry there** — this repo has no release
+notes anywhere else, and the numeric-prefix directory layout makes it hard to see from git history
+what changed at feature level.
+
+Write the entry as part of finishing the work, not as a separate step. A change deserves an entry
+when it adds or removes a device, changes a menu command or its defaults, alters the build, or
+refactors a shared abstraction; small fixes and pure cleanups do not. Follow the shape of the
+existing entries: a short "why", then what changed grouped by area with file paths, plus a note on
+how far it was verified (cross-compile only, or tested on real hardware).
+
 ## Updating an installed system
 
 `update-code.sh` downloads a tagged tarball from GitHub, runs `cleanup.sh` (deletes sources known to
