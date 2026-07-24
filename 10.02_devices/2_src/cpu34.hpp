@@ -23,15 +23,15 @@
 
  24-jul-2026  JH      created
 
- Work in progress. The KD11-EA core in cpu34/ is a fork of the 11/20 KA11 core
- and still executes the 11/20 instruction set, with EIS, MFPS/MTPS and the
- 11/34 SWAB behaviour switched on permanently.
+ The KD11-EA core in cpu34/ started as a fork of the 11/20 KA11 core. It now
+ has the KT11-D memory management (cpu34/kt11d.c) with kernel/user modes, plus
+ EIS, MFPS/MTPS and the 11/34 SWAB behaviour.
 
- TODO 11/34: KT11-D memory management. It needs MMR0..MMR3 and the kernel/user
- PAR/PDR blocks. Unlike the 11/20, which publishes nothing, this CPU will then
- have to declare QUNIBUS registers: set register_count and fill registers[],
- as e.g. rl11.cpp does, and handle them in on_after_register_access().
- Until then register_count stays 0 (set by cpu_base_c).
+ register_count stays 0 (set by cpu_base_c): the KT11-D registers (MMR0..MMR2
+ and the kernel/user PAR/PDR blocks) are internal to the CPU, exactly as on
+ real hardware, and are decoded by kd11ea.c dati()/dato(). They are therefore
+ not published as QUNIBUS registers and cannot be reached by other bus
+ masters - use "examine state" to see them.
  */
 #ifndef _CPU34_HPP_
 #define _CPU34_HPP_

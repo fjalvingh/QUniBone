@@ -4,6 +4,68 @@ Notable changes to QUniBone, newest first.
 
 ## Unreleased
 
+### KT11-D memory management for the PDP-11/34
+
+The KD11-EA core was a fork of the 11/20 KA11 and had no memory management, which limited the
+emulated 11/34 to 28K words and made RSX-11M, RT-11 XM and the KT11-D diagnostics impossible to run.
+It now has the complete KT11-D, including the kernel/user processor modes which come with it.
+
+Detailed log of this core, including the KT11-D bit semantics still to be verified against the
+manual: `10.02_devices/2_src/cpu34/CHANGES.md`.
+
+**Design decisions worth knowing**
+
+- The MMU registers are *not* published as QUNIBUS registers. On real hardware the KT11-D sits inside
+  the KD11-EA and does not answer as a bus slave, so they are decoded by `kd11ea.c` `dati()`/`dato()`
+  on the translated physical address, like the console switch register already was. `cpu34_c` keeps
+  `register_count = 0`. This also keeps all MMU state in cached ARM memory: the translation runs on
+  every CPU memory access, and a read of shared PRU RAM there would be uncached.
+- Address translation is *not* offloaded to a PRU. The virtual address is produced in the ARM
+  instruction loop, so a PRU would need a mailbox round trip (~1 µs) where the ARM needs ~20 ns; PRU1
+  also has no timing slack, and the KT11-D has no UNIBUS map, so device DMA is never relocated. The
+  PRU already receives the translated physical address for free through the existing mailbox field.
+
+**New**
+
+- `10.02_devices/2_src/cpu34/kt11d.c`, `kt11d.h` (new) — the KT11-D. MMR0..MMR2, kernel and user
+  PAR/PDR blocks, 16 → 18 bit relocation with page length and access checks, aborts through vector
+  0250, MMR0<15:13> freeze of MMR0<6:1>/MMR1/MMR2, and the MMR1 register-change log. `kt11d_relocate()`
+  is inline and works from a precomputed 16-entry page descriptor array rebuilt by `kt11d_rebuild()`
+  whenever a PAR, PDR or MMR0 is written. `kt11d_format()` renders the registers for the state dump.
+  Note the 11/34 has no MMR3, no supervisor mode, no I/D separation and no memory management *traps*;
+  its ACF is PDR<2:1>, not the 3-bit field of the 11/45's KT11-C.
+- `10.03_app_demo/2_src/makefile_u`, `makefile_q` — `kt11d.o` added to `$(OBJECTS)` and a build rule.
+
+**Changed**
+
+- `10.02_devices/2_src/cpu34/kd11ea.h`, `kd11ea.c` — `psw` widened from `byte` to `word` for the mode
+  fields, second stack pointer in `stackpointer[]`, `trap_vector` so the bus-error path can trap
+  through 4 or 0250. `ubxt()` replaced by `kt11d_relocate()`. New `kd11ea_set_psw()` is the single
+  place which assigns the PSW: it switches the stack pointer on a mode change, tells the MMU which
+  address space is current, and calls `unibone_prioritylevelchange()`.
+- CPU internal registers are now decoded on the *physical* address. With relocation on, the IO page is
+  reached through a PAR, so the old virtual `(ba & 0177400) == 0177400` test was wrong.
+- The trap sequence was reordered: the vector is fetched in kernel space first, the new PSW gets its
+  previous-mode field, and only then are the old PSW and PC pushed — onto the new mode's stack. The
+  old order pushed onto the old stack, which is correct only for a single-mode 11/20.
+- MFPI/MTPI (and MFPD/MTPD, identical on the 11/34) and RTT implemented; they used to take the
+  reserved instruction trap. RTI/RTT may not change the mode or priority fields in user mode, and RTI
+  takes a pending trace trap immediately where RTT defers it by one instruction.
+- The stack limit red zone now applies to the kernel stack only.
+- The RESET opcode no longer resets the memory management: bus INIT does not reach the KT11-D on real
+  hardware, and an OS executing RESET must keep its address map. Console START and power-up go through
+  the new `kd11ea_power_reset()`, which does clear it.
+- Fixed: MTPS changed PSW<7:5> without telling the arbitrator, leaving
+  `mailbox->arbitrator.ifs_priority_level` stale.
+- Removed the PSW at 777776. The 11/34 has no bus-addressable PSW — that is why it has MFPS/MTPS —
+  so an access there is now a bus timeout. Programs which wrote the CPU PSW through 777776 must use
+  MTPS instead.
+- `kd11ea_printstate()`/`kd11ea_tracestate()` show the 16 bit PSW, the processor mode, both stack
+  pointers and the full MMU register set, since the MMU registers cannot be read over the bus.
+
+Verified: cross-compile only (`./crossco -a`, UNIBUS, clean under `-Wall -Wextra -Wshadow`). Not yet
+run on real hardware; the KT11-D diagnostics are the acceptance test still to do.
+
 ### 11/20 emulation no longer executes 11/34 instructions
 
 The KA11 core had two runtime switches, `extended_inst` and `allow_mxps`, which enabled instructions
@@ -54,10 +116,9 @@ add further CPU models and to select one of them at runtime.
   (`KD11EA_EXTENDED_INSTR`, `KD11EA_ALLOW_MXPS`, `KD11EA_SWAB_VBIT`).
 - `10.02_devices/2_src/cpu34.hpp` / `cpu34.cpp` (new) — `cpu34_c` "CPU34" / "PDP-11/34".
 
-  Work in progress: the fork still executes the 11/20 instruction set. Search for `TODO 11/34` for
-  what is missing, above all the KT11-D memory management (MMR0..MMR3 and the kernel/user PAR/PDR
-  blocks, 16 -> 18 bit relocation in `ubxt()`). The 11/34 will be the first CPU which has to publish
-  QUNIBUS registers; until then `register_count` stays 0.
+  At this point the fork still executed the 11/20 instruction set, without memory management. The
+  KT11-D was added in the entry above; it needs MMR0..MMR2 (the 11/34 has no MMR3) and turned out
+  not to need QUNIBUS registers at all, so `register_count` stays 0.
 
 **Selecting a CPU**
 

@@ -107,6 +107,7 @@ OBJECTS = $(OBJDIR)/application.o	\
 	$(OBJDIR)/ka11.o	\
 	$(OBJDIR)/cpu34.o	\
 	$(OBJDIR)/kd11ea.o	\
+	$(OBJDIR)/kt11d.o	\
 	$(OBJDIR)/rl0102.o	\
     $(OBJDIR)/rl11.o	\
     $(OBJDIR)/rk11.o        \
@@ -270,6 +271,9 @@ $(OBJDIR)/cpu34.o :  $(DEVICE_SRC_DIR)/cpu34.cpp $(DEVICE_SRC_DIR)/cpu34.hpp
 	$(CC) $(CCFLAGS) $< -o $@
 
 $(OBJDIR)/kd11ea.o :  $(DEVICE_SRC_DIR)/cpu34/kd11ea.c $(DEVICE_SRC_DIR)/cpu34/kd11ea.h
+	$(CC) $(CCFLAGS) -x c++ -Wno-parentheses $< -o $@
+
+$(OBJDIR)/kt11d.o :  $(DEVICE_SRC_DIR)/cpu34/kt11d.c $(DEVICE_SRC_DIR)/cpu34/kt11d.h
 	$(CC) $(CCFLAGS) -x c++ -Wno-parentheses $< -o $@
 
 $(OBJDIR)/rl0102.o :  $(DEVICE_SRC_DIR)/rl0102.cpp $(DEVICE_SRC_DIR)/rl0102.hpp

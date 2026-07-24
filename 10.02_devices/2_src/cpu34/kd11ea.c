@@ -1,14 +1,15 @@
 /* kd11ea.c: PDP-11/34 (KD11-EA) CPU emulation core
 
- Forked from cpu20/ka11.c, Angelo Papenhoff's KA11 (PDP-11/20).
- As of the fork this still executes the 11/20 instruction set; search for
- "TODO 11/34" for what has to be added to make it a real 11/34.
+ Forked from cpu20/ka11.c, Angelo Papenhoff's KA11 (PDP-11/20), then extended
+ with the KT11-D memory management (cpu34/kt11d.c) and the kernel/user
+ processor modes which come with it.
 
  All symbols are either static or prefixed kd11ea_/KD11EA: this core is linked
  into the same binary as the KA11 core of the 11/20.
  */
 
 #include "11.h"
+#include "kt11d.h"
 #include "kd11ea.h"
 #include <stdlib.h>
 
@@ -43,11 +44,32 @@ datob_bus(Bus *bus)
 	return !unibone_datob(bus->addr, bus->data);
 }
 
-static void
-levelchange(word psw)
+/* Assign the PSW.
+ Besides the value itself this switches the stack pointer if the processor
+ mode changed, tells the MMU which address space is current now, and tells the
+ QUNIBUS arbitrator the new priority level.
+ Instructions which only touch the condition codes assign cpu->psw directly:
+ going through here on every opcode would call into the arbitrator each time.
+ */
+void
+kd11ea_set_psw(KD11EA *cpu, word newpsw)
 {
-	unibone_prioritylevelchange(psw>>5);
+	unsigned oldsp = ((cpu->psw>>14)&3) == KT11D_MODE_KERNEL ?
+			KD11EA_SP_KERNEL : KD11EA_SP_USER;
+	unsigned newsp = ((newpsw>>14)&3) == KT11D_MODE_KERNEL ?
+			KD11EA_SP_KERNEL : KD11EA_SP_USER;
+
+	if(oldsp != newsp){
+		cpu->stackpointer[oldsp] = cpu->r[6];
+		cpu->r[6] = cpu->stackpointer[newsp];
+	}
+	cpu->psw = newpsw;
+	kt11d_set_modes(&cpu->mmu, newpsw);
+	unibone_prioritylevelchange((newpsw>>5) & 7);
 }
+
+// is the CPU in kernel mode? Stack limit and the RTI/RTT restrictions need it.
+#define IS_KERNEL(cpu)	((((cpu)->psw>>14)&3) == KT11D_MODE_KERNEL)
 
 
 
@@ -86,48 +108,41 @@ sxt(byte b)
 	return (word)(int8_t)b;
 }
 
-// map the 16 bit virtual address to a physical QUNIBUS address.
-// TODO 11/34: this is the place for the KT11-D memory management.
-// When MMR0<0> ("enable relocation") is set, the address has to be relocated
-// through the PAR/PDR pair selected by PSW<15:14> (kernel/user) and the
-// virtual address bits <15:13>, giving an 18 bit physical address, with
-// page length and access checks aborting through vector 250.
-// Without relocation the 11/34 does the same as the 11/20 below: the top 8K
-// of the 16 bit space is mapped to the top 8K of the 18 bit space (IOpage).
-static uint32
-ubxt(word a)
-{
-	return (a&0160000)==0160000 ? a|0600000 : a;
-}
+/* The 16 -> 18 bit address mapping lives in kt11d.h: kt11d_relocate() either
+ relocates through the KT11-D page table, or - when MMR0<0> is clear - maps
+ the top 8K of the virtual space to the IO page, exactly as the 11/20 does.
+ */
+
+// the KT11-D registers are internal to the CPU and not readable over the bus,
+// so these dumps are the only way to see the state of the memory management.
+#define KD11EA_STATE_FMT \
+	" R0 %06o R1 %06o R2 %06o R3 %06o R4 %06o R5 %06o R6 %06o R7 %06o\n" \
+	" 10 %06o 11 %06o 12 %06o 13 %06o 14 %06o 15 %06o 16 %06o 17 %06o\n" \
+	" BA %06o IR %06o PSW %06o (%s mode, KSP %06o USP %06o)\n%s"
+#define KD11EA_STATE_ARGS \
+	cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3], \
+	cpu->r[4], cpu->r[5], cpu->r[6], cpu->r[7], \
+	cpu->r[8], cpu->r[9], cpu->r[10], cpu->r[11], \
+	cpu->r[12], cpu->r[13], cpu->r[14], cpu->r[15], \
+	cpu->ba, cpu->ir, cpu->psw, IS_KERNEL(cpu) ? "kernel" : "user", \
+	IS_KERNEL(cpu) ? cpu->r[6] : cpu->stackpointer[KD11EA_SP_KERNEL], \
+	IS_KERNEL(cpu) ? cpu->stackpointer[KD11EA_SP_USER] : cpu->r[6], \
+	mmubuf
 
 void
 kd11ea_tracestate(KD11EA *cpu)
 {
-	(void)cpu;
-	trace(" R0 %06o R1 %06o R2 %06o R3 %06o R4 %06o R5 %06o R6 %06o R7 %06o\n"
-		" 10 %06o 11 %06o 12 %06o 13 %06o 14 %06o 15 %06o 16 %06o 17 %06o\n"
-		" BA %06o IR %06o PSW %03o\n"
-		,
-		cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3],
-		cpu->r[4], cpu->r[5], cpu->r[6], cpu->r[7],
-		cpu->r[8], cpu->r[9], cpu->r[10], cpu->r[11],
-		cpu->r[12], cpu->r[13], cpu->r[14], cpu->r[15],
-		cpu->ba, cpu->ir, cpu->psw);
+	char mmubuf[512];
+	kt11d_format(&cpu->mmu, mmubuf, sizeof(mmubuf));
+	trace(KD11EA_STATE_FMT, KD11EA_STATE_ARGS);
 }
 
 void
 kd11ea_printstate(KD11EA *cpu)
 {
-	(void)cpu;
-	printf(" R0 %06o R1 %06o R2 %06o R3 %06o R4 %06o R5 %06o R6 %06o R7 %06o\n"
-		" 10 %06o 11 %06o 12 %06o 13 %06o 14 %06o 15 %06o 16 %06o 17 %06o\n"
-		" BA %06o IR %06o PSW %03o\n"
-		,
-		cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3],
-		cpu->r[4], cpu->r[5], cpu->r[6], cpu->r[7],
-		cpu->r[8], cpu->r[9], cpu->r[10], cpu->r[11],
-		cpu->r[12], cpu->r[13], cpu->r[14], cpu->r[15],
-		cpu->ba, cpu->ir, cpu->psw);
+	char mmubuf[512];
+	kt11d_format(&cpu->mmu, mmubuf, sizeof(mmubuf));
+	printf(KD11EA_STATE_FMT, KD11EA_STATE_ARGS);
 }
 
 // only to be called from kd11ea_condstep() thread
@@ -139,42 +154,68 @@ kd11ea_reset(KD11EA *cpu)
 	cpu->traps = 0;
 	cpu->external_intr = 0;
 	cpu->mutex = PTHREAD_MUTEX_INITIALIZER ;
-	// TODO 11/34: clear MMR0..MMR2, disabling relocation.
+	// The KT11-D is deliberately NOT touched here: on real hardware the RESET
+	// opcode pulses bus INIT, which does not reach the memory management.
+	// An OS executing RESET must keep its address map - see kd11ea_power_reset()
+	// for the console START / power-up case.
 
 	for(bd = cpu->bus->devs; bd; bd = bd->next)
 		bd->reset(bd->dev);
 }
 
+// console START and power-up: everything kd11ea_reset() does, plus the state
+// which survives a RESET opcode - memory management, PSW and stack pointers.
+// only to be called from kd11ea_condstep() thread
+void
+kd11ea_power_reset(KD11EA *cpu)
+{
+	kd11ea_reset(cpu);
+	kt11d_reset(&cpu->mmu);	// clears MMR0, disabling relocation
+	cpu->stackpointer[KD11EA_SP_KERNEL] = 0;
+	cpu->stackpointer[KD11EA_SP_USER] = 0;
+	cpu->trap_vector = 4;
+	kd11ea_set_psw(cpu, 0);	// kernel mode, priority 0
+}
+
+/* The CPU internal registers are decoded on the *physical* address: once
+ relocation is on, the IO page is reached through a PAR and the virtual
+ address says nothing about which register is meant.
+ The 11/34 has no PSW at 777776 - MFPS/MTPS are there instead - but it does
+ answer for the KT11-D registers, which are internal to the KD11-EA and are
+ therefore not published as QUNIBUS registers of cpu34_c. */
 static int
 dati(KD11EA *cpu, int b)
 {
+	uint32 pa;
+	word w;
+
 	if(!b && cpu->ba&1)
 		goto be;
 
+	if(kt11d_relocate(&cpu->mmu, cpu->ba, cpu->mmu.access_space, KT11D_READ, &pa))
+		goto abort;
+
 	/* internal registers */
-	// TODO 11/34: the 11/34 has no PSW at 777776 (use MFPS/MTPS instead),
-	// but it does answer for MMR0..MMR2 (777572..777576) and the PAR/PDR
-	// blocks (772300.. and 777600..). Those are better published as QUNIBUS
-	// registers of cpu34_c, so other bus masters can read them too.
-	if((cpu->ba&0177400) == 0177400){
-		switch(cpu->ba&0377){
-		case 0170: case 0171:
+	if(pa >= 0760000){
+		if(kt11d_read_reg(&cpu->mmu, pa & ~1, &w)){
+			cpu->bus->data = w;
+			goto ok;
+		}
+		switch(pa){
+		case 0777570: case 0777571:
 			cpu->bus->data = cpu->sw;
 			goto ok;
-		case 0376:
-			cpu->bus->data = cpu->psw;
-			goto ok;
-		case 0377:
-		    goto be;
+		case 0777776: case 0777777:
+			goto be;
 
 		/* respond but don't return real data */
-		case 0147:
+		case 0777547:
 			cpu->bus->data = 0;
 			goto ok;
 		}
 	}
 
-	cpu->bus->addr = ubxt(cpu->ba)&~1;
+	cpu->bus->addr = pa&~1;
 	if(dati_bus(cpu->bus))
 		goto be;
 ok:
@@ -184,6 +225,11 @@ if (unibone_trace_addr(cpu->ba))
 	return 0;
 be:
 	trace("DATI [%06o]: NXM\n", cpu->ba);
+	cpu->trap_vector = 4;
+	cpu->be++;
+	return 1;
+abort:
+	cpu->trap_vector = KT11D_ABORT_VECTOR;
 	cpu->be++;
 	return 1;
 }
@@ -191,34 +237,38 @@ be:
 static int
 dato(KD11EA *cpu, int b)
 {
+	uint32 pa;
+	word mask;
+
 if (unibone_trace_addr(cpu->ba)) // default: all
 trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bus->data);
 	if(!b && cpu->ba&1)
 		goto be;
 
+	if(kt11d_relocate(&cpu->mmu, cpu->ba, cpu->mmu.access_space, KT11D_WRITE, &pa))
+		goto abort;
+
 	/* internal registers */
-	if((cpu->ba&0177400) == 0177400){
-		switch(cpu->ba&0377){
-		case 0170: case 0171:
+	if(pa >= 0760000){
+		// bus->data already holds the byte in the half selected by the address
+		mask = b ? (pa&1 ? 0177400 : 0377) : 0177777;
+		if(kt11d_write_reg(&cpu->mmu, pa & ~1, cpu->bus->data, mask))
+			goto ok;
+		switch(pa){
+		case 0777570: case 0777571:
 			/* can't write switches */
 			goto ok;
-		case 0376:
-			/* writes 0 for the odd byte.
-			   I think this is correct. */
-			cpu->psw = cpu->bus->data;
-			levelchange(cpu->psw);
-			goto ok;
-		case 0377:
-		    goto be;
+		case 0777776: case 0777777:
+			goto be;
 		}
 	}
 
 	if(b){
-		cpu->bus->addr = ubxt(cpu->ba);
+		cpu->bus->addr = pa;
 		if(datob_bus(cpu->bus))
 			goto be;
 	}else{
-		cpu->bus->addr = ubxt(cpu->ba)&~1;
+		cpu->bus->addr = pa&~1;
 		if(dato_bus(cpu->bus))
 			goto be;
 	}
@@ -226,6 +276,11 @@ ok:
 	cpu->be = 0;
 	return 0;
 be:
+	cpu->trap_vector = 4;
+	cpu->be++;
+	return 1;
+abort:
+	cpu->trap_vector = KT11D_ABORT_VECTOR;
 	cpu->be++;
 	return 1;
 }
@@ -270,11 +325,15 @@ addrop(KD11EA *cpu, int m, int b)
 	case 2:		// INC
 		cpu->ba = cpu->r[r];
 		cpu->b = cpu->r[r] = cpu->r[r] + ai;
+		// MMR1 records the change, so an abort handler can undo it
+		kt11d_log_register(&cpu->mmu, r, ai);
 		break;
 	case 4:		// DEC
 		cpu->b = cpu->ba = cpu->r[r]-ai;
-		if(r == 6 && (cpu->ba&~0377) == 0) cpu->traps |= TRAP_STACK;
+		// stack limit applies to the kernel stack only
+		if(r == 6 && IS_KERNEL(cpu) && (cpu->ba&~0377) == 0) cpu->traps |= TRAP_STACK;
 		cpu->r[r] = cpu->ba;
+		kt11d_log_register(&cpu->mmu, r, -ai);
 		break;
 	case 6:		// INDEX
 		cpu->ba = cpu->r[7];
@@ -347,7 +406,8 @@ step(KD11EA *cpu)
 	uint src, dst, sf, df, sm, dm;
 	word mask, sign;
 	int inhov;
-	byte oldpsw;
+	word oldpsw;	// 16 bits since the KT11-D added the mode fields
+	word trapped_pc, trapped_psw, newpc, newpsw;	// used by the trap sequence
 	uint reg;
 	int32_t prod;
 	word sh;
@@ -387,8 +447,12 @@ step(KD11EA *cpu)
 #define BXT	if(by) b = sxt(b)
 #define BR	PC += br
 #define CBR(c)	if(((c)>>(cpu->psw&017)) & 1) BR
-#define PUSH	SP -= 2; if(!inhov && (SP&~0377) == 0) cpu->traps |= TRAP_STACK
+#define PUSH	SP -= 2; if(!inhov && IS_KERNEL(cpu) && (SP&~0377) == 0) cpu->traps |= TRAP_STACK
 #define POP	SP += 2
+// force the address space of the next dati()/dato(): trap vector fetches and
+// the trap pushes are always kernel references, MFPI/MTPI use the previous mode
+#define SPACE(s)	cpu->mmu.access_space = (s)
+#define SPACE_RESTORE	cpu->mmu.access_space = cpu->mmu.space
 #define OUT(a,d)	cpu->ba = (a); cpu->bus->data = (d); if(dato(cpu, 0)) goto be
 #define IN(d)	if(dati(cpu, 0)) goto be; d = cpu->bus->data
 #define INA(a,d)	cpu->ba = a; if(dati(cpu, 0)) goto be; d = cpu->bus->data
@@ -422,6 +486,9 @@ step(KD11EA *cpu)
 //	}
 
 	oldpsw = PSW;
+	// MMR2 latches the address of this instruction, MMR1 starts empty.
+	// Both stay frozen while MMR0 holds an abort.
+	kt11d_instruction_start(&cpu->mmu, PC);
 	INA(PC, cpu->ir);
 	PC += 2;	/* don't increment on bus error! */
 	by = !!(cpu->ir&B15);
@@ -742,12 +809,52 @@ step(KD11EA *cpu)
 			goto ri;
 		TR(MTPS);
 		RD_U;
-		cpu->psw = (cpu->psw & 0xff00) | (DR & 0377);
+		// changes PSW<7:5>, so the arbitrator has to be told: go through
+		// kd11ea_set_psw(). The mode bits are not affected.
+		kd11ea_set_psw(cpu, (cpu->psw & 0xff00) | (DR & 0377));
 		SVC;
 
-	case 0006500:
-	case 0006600:
-		goto ri;
+	/* MFPI/MTPI address in the current mode but transfer in the previous
+	   mode. The 11/34 has no separate I and D space, so MFPD/MTPD (the
+	   1065xx/1066xx byte-bit variants) are the same instructions. */
+	case 0006500:	TR(MFPI);
+		by = 0;
+		if(dm == 0){
+			// register mode: R6 means the previous mode's stack pointer
+			if(df == 6 && cpu->mmu.prev_space != cpu->mmu.space)
+				b = cpu->stackpointer[cpu->mmu.prev_space == KT11D_SPACE_KERNEL ?
+						KD11EA_SP_KERNEL : KD11EA_SP_USER];
+			else
+				b = cpu->r[df];
+		}else{
+			if(addrop(cpu, dst, 0)) goto be;
+			SPACE(cpu->mmu.prev_space);
+			if(dati(cpu, 0)){ SPACE_RESTORE; goto be; }
+			SPACE_RESTORE;
+			b = cpu->bus->data;
+		}
+		CLV; NZ;
+		PUSH; OUT(SP, b);
+		SVC;
+
+	case 0006600:	TR(MTPI);
+		by = 0;
+		BA = SP; POP; IN(b);
+		CLV; NZ;
+		if(dm == 0){
+			if(df == 6 && cpu->mmu.prev_space != cpu->mmu.space)
+				cpu->stackpointer[cpu->mmu.prev_space == KT11D_SPACE_KERNEL ?
+						KD11EA_SP_KERNEL : KD11EA_SP_USER] = b;
+			else
+				cpu->r[df] = b;
+		}else{
+			if(addrop(cpu, dst, 0)) goto be;
+			cpu->bus->data = b;
+			SPACE(cpu->mmu.prev_space);
+			if(dato(cpu, 0)){ SPACE_RESTORE; goto be; }
+			SPACE_RESTORE;
+		}
+		SVC;
 
 	case 0006700:
 		// mfps. Only the byte form 106700 is MFPS, 006700 is SXT
@@ -832,10 +939,20 @@ step(KD11EA *cpu)
 	switch(cpu->ir){
 	case 0:	TR(HALT); cpu->state = KD11EA_STATE_HALTED; return;
 	case 1:	TR(WAIT); cpu->state = KD11EA_STATE_WAITING; return ; // no traps
-	case 2:	TR(RTI);
+	case 2:
+	case 6:
+		if(cpu->ir == 2){ TR(RTI); }else{ TR(RTT); }
 		BA = SP; POP; IN(PC);
-		BA = SP; POP; IN(PSW);
-		levelchange(cpu->psw) ;
+		BA = SP; POP; IN(b);
+		// In user mode neither RTI nor RTT may change the mode fields or the
+		// priority: those bits keep their current value.
+		if(!IS_KERNEL(cpu))
+			b = (b & ~(0170000|PSW_PR)) | (PSW & (0170000|PSW_PR));
+		// RTI takes a pending trace trap right away, RTT defers it by one
+		// instruction. service: tests oldpsw, which gives the RTT behaviour.
+		if(cpu->ir == 2 && (b & PSW_T))
+			oldpsw |= PSW_T;
+		kd11ea_set_psw(cpu, b);
 		SVC;
 	case 3:	TR(BPT); TRAP(014);
 	case 4:	TR(IOT); TRAP(020);
@@ -853,26 +970,38 @@ be:	if(cpu->be > 1){
 		return;
 	}
 	trace("bus error at %06o\n", cpu->ba);
-	TRAP(4);
+	// 4 for a bus timeout or an odd address, 0250 for an MMU abort
+	TRAP(cpu->trap_vector);
 
 trap:
 	if (unibone_trace_addr(PC-2))
 	trace("TRAP %o\n", TV);
-	PUSH; OUT(SP, PSW);
-	PUSH; OUT(SP, PC);
-	INA(TV, PC);
-	INA(TV+2, PSW);
-	levelchange(PSW);
+	trapped_pc = PC;
+	trapped_psw = PSW;
+	/* The vector is read through kernel space and *before* the mode switch:
+	   PSW<15:14> may still say "user" at this point. Then the new PSW is
+	   installed - which switches the stack pointer - and only then are the
+	   old PSW and PC pushed, onto the new mode's stack. */
+	SPACE(KT11D_SPACE_KERNEL);
+	BA = TV;	if(dati(cpu, 0)) goto be;	newpc = cpu->bus->data;
+	BA = TV+2;	if(dati(cpu, 0)) goto be;	newpsw = cpu->bus->data;
+	SPACE_RESTORE;
+	// previous mode of the new PSW := the mode the trap came from
+	newpsw = (newpsw & ~030000) | ((trapped_psw >> 2) & 030000);
+	kd11ea_set_psw(cpu, newpsw);
+	PUSH; OUT(SP, trapped_psw);
+	PUSH; OUT(SP, trapped_pc);
+	PC = newpc;
 	/* no trace trap after a trap */
 	oldpsw = PSW;
 
-	if (unibone_trace_addr(PC-2)) 
+	if (unibone_trace_addr(PC-2))
 	kd11ea_tracestate(cpu);
 	return;		// TODO: is this correct?
 //	SVC;
 
 service:
-	c = PSW >> 5;
+	c = (PSW >> 5) & 7;	// PSW is 16 bits now, mask the priority out
 	if(oldpsw & PSW_T){
 		oldpsw &= ~PSW_T;
 		TRAP(014);
@@ -931,7 +1060,10 @@ kd11ea_pwrup_vector_fetch(KD11EA *cpu)
 	// caller must have issued reset()
 	// cpu->traps &= ~TRAP_PWR; // no, would be a fix
 	INA(024, PC);
-	INA(024+2, PSW);
+	BA = 024+2; if(dati(cpu, 0)) goto be;
+	// through kd11ea_set_psw(): the vector may select user mode, which picks
+	// the other stack pointer and address space
+	kd11ea_set_psw(cpu, cpu->bus->data);
 	return ;
 be:
 	trace("BE\n");

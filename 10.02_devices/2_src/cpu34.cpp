@@ -64,7 +64,8 @@ void cpu34_c::core_condstep(void)
 
 void cpu34_c::core_reset(void)
 {
-    kd11ea_reset(kd11ea);
+    // console START / power-up, not the RESET opcode: also clears the KT11-D
+    kd11ea_power_reset(kd11ea);
 }
 
 void cpu34_c::core_setintr(uint16_t vector)
