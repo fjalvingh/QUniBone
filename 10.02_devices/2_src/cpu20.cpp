@@ -45,8 +45,6 @@ cpu20_c::cpu20_c() :
     log_label = "cpu20";
 
     swab_vbit.value = false;
-    extended_instr.value = false;
-    allow_mxps.value = false;
 
     // emulation core state. Not in the header, so cpu20.hpp stays free of ka11.h
     bus = (struct Bus *) calloc(1, sizeof(struct Bus));
@@ -126,6 +124,4 @@ void cpu20_c::core_set_switches(uint16_t value)
 void cpu20_c::core_apply_options(void)
 {
     ka11->swab_vbit = (swab_vbit.value == true);
-    ka11->extended_instr = (extended_instr.value == true);
-    ka11->allow_mxps = (allow_mxps.value == true);
 }

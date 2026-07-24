@@ -66,8 +66,8 @@ public:
     uint16_t core_get_pc(void) override;
     void core_set_pc(uint16_t value) override;
     void core_set_switches(uint16_t value) override;
-    // no core_apply_options(): the 11/20 options are fixed on the 11/34,
-    // see the KD11EA_* defines in cpu34/kd11ea.c
+    // no core_apply_options(): the 11/34 has no CPU feature parameters.
+    // EIS and MFPS/MTPS are always executed, SWAB always clears the V bit.
 };
 
 #endif

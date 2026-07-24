@@ -4,6 +4,24 @@ Notable changes to QUniBone, newest first.
 
 ## Unreleased
 
+### 11/20 emulation no longer executes 11/34 instructions
+
+The KA11 core had two runtime switches, `extended_inst` and `allow_mxps`, which enabled instructions
+a real PDP-11/20 does not have. That is not legal for an 11/20 emulation, and with a separate 11/34
+emulation available there is no longer a reason for it.
+
+- `10.02_devices/2_src/cpu20/ka11.c`, `ka11.h` — removed the EIS implementation (MUL, DIV, ASH, ASHC,
+  XOR, SOB, opcode group 0070000) and MTPS/MFPS (0006400/0006700). These opcodes now take the
+  reserved instruction trap through vector 010, as on real hardware. The `extended_instr` and
+  `allow_mxps` fields are gone from `struct KA11`.
+- `10.02_devices/2_src/cpu20.hpp`, `cpu20.cpp` — removed the `extended_inst` ("exti") and
+  `allow_mxps` ("mxps") device parameters. `swab_vbit` ("swab") is unaffected and stays.
+- `10.02_devices/2_src/cpu34/kd11ea.c` — EIS and MTPS/MFPS are native to the KD11-EA, so the
+  conditionals around them are gone and the instructions are always executed. The byte bit test in
+  MTPS/MFPS stays: without it 006400/006700 are MARK/SXT, not MTPS/MFPS.
+
+Scripts which set `p exti 1` or `p mxps 1` on CPU20 must use CPU34 instead.
+
 ### Pluggable CPU emulations, PDP-11/34 (KD11-EA) added alongside the 11/20
 
 The emulated CPU was hardwired to Angelo Papenhoff's KA11 (PDP-11/20) core. It is now possible to

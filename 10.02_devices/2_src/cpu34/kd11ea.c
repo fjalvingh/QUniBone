@@ -16,10 +16,9 @@
 
 // unibone_*() declared in cpu_bus_adapter.h, included via 11.h
 
-/* CPU features which were options on the 11/20 but are standard on the 11/34.
-   On the 11/20 these are the runtime parameters of cpu20_c. */
-#define KD11EA_EXTENDED_INSTR	1	// EIS: MUL, DIV, ASH, ASHC, XOR, SOB
-#define KD11EA_ALLOW_MXPS	1	// MFPS / MTPS
+/* EIS (MUL, DIV, ASH, ASHC, XOR, SOB) and MFPS/MTPS are native 11/34
+   instructions and always executed. On the 11/20 they do not exist.
+   SWAB is a CPU feature which is still a runtime parameter of cpu20_c. */
 #define KD11EA_SWAB_VBIT	1	// SWAB clears the V bit
 
 static int
@@ -480,201 +479,198 @@ step(KD11EA *cpu)
 
 	case 0070000:
 		reg = (cpu->ir >> 6) & 07;
-    	if(KD11EA_EXTENDED_INSTR) {
-        	switch(cpu->ir & 0177000) {
-              	default:
-		    		printf("-- ext: %o\n", cpu->ir);
-                	goto ri;
+        switch(cpu->ir & 0177000) {
+              default:
+	    		printf("-- ext: %o\n", cpu->ir);
+                goto ri;
 
-				case 0070000:		TR(MUL);
-					RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V|PSW_C);
-              		{
-              			int32_t v1 = (int16_t) DR;
-              			int32_t v2 = (int16_t) cpu->r[reg];
-        	      		prod = v1 * v2;
-						if(prod < -32768 || prod > 32767) {
-							SEC;
-						}
-						if(prod == 0)
-							SEZ;
-						if(prod & B31)
-							SEN;
+			case 0070000:		TR(MUL);
+				RD_U;
+              	cpu->psw &= ~(PSW_N|PSW_Z|PSW_V|PSW_C);
+              	{
+              		int32_t v1 = (int16_t) DR;
+              		int32_t v2 = (int16_t) cpu->r[reg];
+              		prod = v1 * v2;
+					if(prod < -32768 || prod > 32767) {
+						SEC;
+					}
+					if(prod == 0)
+						SEZ;
+					if(prod & B31)
+						SEN;
 
-              			if(reg & 0x1) {
-              				//-- Odd register: store only lower 16 bits
-							cpu->r[reg] = (word) prod;
-            	  		} else {
-        	      			cpu->r[reg + 1] = prod & 0xffff;
-    	          			cpu->r[reg] = (word) (prod >> 16);
-	              		}
+              		if(reg & 0x1) {
+              			//-- Odd register: store only lower 16 bits
+						cpu->r[reg] = (word) prod;
+              		} else {
+              			cpu->r[reg + 1] = prod & 0xffff;
+              			cpu->r[reg] = (word) (prod >> 16);
               		}
-					SVC;
+              	}
+				SVC;
 
-				case 0071000:		TR(DIV);
-					RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V|PSW_C);
-					if(reg & 0x1) goto ri;			// for div register must be even
-					{
-						int32_t dv = (int16_t) DR;
-						prod = (uint32_t) cpu->r[reg + 1] | ((uint32_t) cpu->r[reg] << 16);
-						if(DR == 0) {
-							SEC;
+			case 0071000:		TR(DIV);
+				RD_U;
+              	cpu->psw &= ~(PSW_N|PSW_Z|PSW_V|PSW_C);
+				if(reg & 0x1) goto ri;			// for div register must be even
+				{
+					int32_t dv = (int16_t) DR;
+					prod = (uint32_t) cpu->r[reg + 1] | ((uint32_t) cpu->r[reg] << 16);
+					if(DR == 0) {
+						SEC;
+						SEV;
+					} else {
+						ldiv_t d = ldiv(prod, dv);
+						if(d.quot < -32768 || d.quot > 32767) {
 							SEV;
 						} else {
-							ldiv_t d = ldiv(prod, dv);
-							if(d.quot < -32768 || d.quot > 32767) {
-								SEV;
-							} else {
-								cpu->r[reg] = (word) d.quot;
-								cpu->r[reg + 1] = (word) (d.rem);
-							}
-							if(sgn(d.quot))
-								SEN;
-							if(0 == (d.quot & 0xffff))
-								SEZ;
+							cpu->r[reg] = (word) d.quot;
+							cpu->r[reg + 1] = (word) (d.rem);
 						}
+						if(sgn(d.quot))
+							SEN;
+						if(0 == (d.quot & 0xffff))
+							SEZ;
 					}
-					SVC;
+				}
+				SVC;
 
-				case 0072000:		TR(ASH);
-                	// ASH
-					RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
-					b = cpu->r[reg];
-					sh = (DR & 0x3f);				// Extract 6 bits
-					if(sh & 0x20) {					// -ve?
+			case 0072000:		TR(ASH);
+                // ASH
+				RD_U;
+              	cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
+				b = cpu->r[reg];
+				sh = (DR & 0x3f);				// Extract 6 bits
+				if(sh & 0x20) {					// -ve?
+					// we shift right
+					sh = 0x40 - sh;					// +ve shift, 1..62
+               		mask = sgn(b) ? 0xffff : 0x0;	// The previous sign gets shifted in
+                    if(sh >= 17) {
+                        // Really shifted out completely.
+                		b = mask;
+                		if(mask)
+                			SEC;
+                		else
+                			CLC;
+                		NZ;
+                	} else {
+						if(b & (1 << (sh - 1)))
+							SEC;
+						else
+							CLC;
+						b >>= sh;
+						mask <<= (16 - sh);
+						b |= mask;					// Sign extend
+						b &= 0xffff;
+						NZ;
+						if(b & B15)
+							SEN;
+                	}
+                } else {
+                	// we shift left
+                	if(sh == 0) {
+                		//-- Nothing -> only set Z and N flags
+                		NZ;
+                	} else if(sh >= 17) {
+                		if(sgn(b))
+                			SEV;
+						b = 0;
+						CLC;
+						SEZ;
+					} else {
+						//-- Loop, to handle overflow correctly: overflow is part of the last step!
+						while(sh-- > 0) {
+							if(b & B15) {
+								SEC;
+							} else {
+								CLC;
+							}
+							uint ob = b;
+							b <<= 1;
+							ob ^= b;
+							if(ob & B15) {					// Sign changed?
+								SEV;
+							}
+						}
+						NZ;
+					}
+                }
+                b &= 0xffff;
+				cpu->r[reg] = b;
+				SVC;
+
+              case 0073000:		TR(ASHC);
+				RD_U;
+              	cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
+              	{
+              		uint32_t val = ((uint32_t) cpu->r[reg] << 16) | cpu->r[reg | 1];	// The bitwise OR is intentional!
+
+					sh = (DR & 0x3f);					// Extract 6 bits
+					if(sh & 0x20) {						// -ve?
 						// we shift right
 						sh = 0x40 - sh;					// +ve shift, 1..62
-               			mask = sgn(b) ? 0xffff : 0x0;	// The previous sign gets shifted in
-                        if(sh >= 17) {
-                        	// Really shifted out completely.
-                			b = mask;
-                			if(mask)
-                				SEC;
-                			else
-                				CLC;
-                			NZ;
-                		} else {
-							if(b & (1 << (sh - 1)))
-								SEC;
-							else
-								CLC;
-							b >>= sh;
-							mask <<= (16 - sh);
-							b |= mask;					// Sign extend
-							b &= 0xffff;
-							NZ;
-							if(b & B15)
-								SEN;
-                		}
-                	} else {
-                		// we shift left
-                		if(sh == 0) {
-                			//-- Nothing -> only set Z and N flags
-                			NZ;
-                		} else if(sh >= 17) {
-                			if(sgn(b))
-                				SEV;
-							b = 0;
+                		uint32_t msk = val & B31 ? 0xffffffffL : 0x0;
+						if(val & (1 << (sh - 1)))
+							SEC;
+						else
 							CLC;
+						val >>= sh;
+						msk <<= (32 - sh);
+						val |= msk;				// Sign extend
+						if(val == 0)
 							SEZ;
-						} else {
-							//-- Loop, to handle overflow correctly: overflow is part of the last step!
-							while(sh-- > 0) {
-								if(b & B15) {
-									SEC;
-								} else {
-									CLC;
-								}
-								uint ob = b;
-								b <<= 1;
-								ob ^= b;
-								if(ob & B15) {					// Sign changed?
-									SEV;
-								}
-							}
-							NZ;
-						}
-                	}
-                	b &= 0xffff;
-					cpu->r[reg] = b;
-					SVC;
-
-              	case 0073000:		TR(ASHC);
-					RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
-              		{
-              			uint32_t val = ((uint32_t) cpu->r[reg] << 16) | cpu->r[reg | 1];	// The bitwise OR is intentional!
-
-						sh = (DR & 0x3f);					// Extract 6 bits
-						if(sh & 0x20) {						// -ve?
-							// we shift right
-							sh = 0x40 - sh;					// +ve shift, 1..62
-        	        		uint32_t msk = val & B31 ? 0xffffffffL : 0x0;
-							if(val & (1 << (sh - 1)))
+						if(val & B31)
+							SEN;
+                	} else {
+						while(sh-- > 0) {
+							if(val & B31) {
 								SEC;
-							else
+							} else {
 								CLC;
-							val >>= sh;
-							msk <<= (32 - sh);
-							val |= msk;				// Sign extend
-							if(val == 0)
-								SEZ;
-							if(val & B31)
-								SEN;
-	                	} else {
-							while(sh-- > 0) {
-								if(val & B31) {
-									SEC;
-								} else {
-									CLC;
-								}
-								uint32_t ob = val;
-								val <<= 1;
-								ob ^= val;
-								if(ob & B31) {					// Sign changed?
-									SEV;
-								}
 							}
-							if(val == 0)
-								SEZ;
-							if(val & B31)
-								SEN;
-            	    	}
-						if(reg & 0x1) {
-							cpu->r[reg] = (word) val;		// Truncated result
-						} else {
-							cpu->r[reg] = (word) (val >> 16);
-							cpu->r[reg + 1] = (word) val;
+							uint32_t ob = val;
+							val <<= 1;
+							ob ^= val;
+							if(ob & B31) {					// Sign changed?
+								SEV;
+							}
 						}
+						if(val == 0)
+							SEZ;
+						if(val & B31)
+							SEN;
+                	}
+					if(reg & 0x1) {
+						cpu->r[reg] = (word) val;		// Truncated result
+					} else {
+						cpu->r[reg] = (word) (val >> 16);
+						cpu->r[reg + 1] = (word) val;
 					}
-					SVC;
-                	break;
+				}
+				SVC;
+                break;
 
-              	case 0074000:		TR(XOR);
-              		RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
-					b = cpu->r[reg];
-					b = DR ^ b;
-					if(sgn(b)) {
-						SEN;
-					}
-					NZ;
-					WR; SVC;
+              case 0074000:		TR(XOR);
+              	RD_U;
+              	cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
+				b = cpu->r[reg];
+				b = DR ^ b;
+				if(sgn(b)) {
+					SEN;
+				}
+				NZ;
+				WR; SVC;
 
-				case 0077000:		TR(SOB);
-					b = --(cpu->r[reg]);		// decrement reg
-					if(b != 0) {
-						//-- Jump
-						mask = (cpu->ir & 077) << 1;			// Get jump offset (*2)
-						cpu->r[7] -= mask;						// Decrement by offset
-					}
-					SVC;
-			}
+			case 0077000:		TR(SOB);
+				b = --(cpu->r[reg]);		// decrement reg
+				if(b != 0) {
+					//-- Jump
+					mask = (cpu->ir & 077) << 1;			// Get jump offset (*2)
+					cpu->r[7] -= mask;						// Decrement by offset
+				}
+				SVC;
 		}
-
-        // All else, or not extended instr
+        // All else: not an EIS opcode
        	goto ri;
 	}
 	//-- remaining here is ir=x0xxxx
@@ -741,8 +737,8 @@ step(KD11EA *cpu)
 		WR; SVC;
 
 	case 0006400:
-		// mtps
-		if(!KD11EA_ALLOW_MXPS || !by)
+		// mtps. Only the byte form 106400 is MTPS, 006400 is MARK
+		if(!by)
 			goto ri;
 		TR(MTPS);
 		RD_U;
@@ -754,8 +750,8 @@ step(KD11EA *cpu)
 		goto ri;
 
 	case 0006700:
-		// mfps
-		if(!KD11EA_ALLOW_MXPS || !by)
+		// mfps. Only the byte form 106700 is MFPS, 006700 is SXT
+		if(!by)
 			goto ri;
 		TR(MFPS);
 		by = 0;

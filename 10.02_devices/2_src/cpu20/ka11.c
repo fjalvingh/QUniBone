@@ -320,9 +320,6 @@ step(KA11 *cpu)
 	word mask, sign;
 	int inhov;
 	byte oldpsw;
-	uint reg;
-	int32_t prod;
-	word sh;
 
 //	printf("fetch from %06o\n", cpu->r[7]);
 //	printstate(cpu);
@@ -450,203 +447,8 @@ step(KA11 *cpu)
         goto ri;
 
 	case 0070000:
-		reg = (cpu->ir >> 6) & 07;
-    	if(cpu->extended_instr) {
-        	switch(cpu->ir & 0177000) {
-              	default:
-		    		printf("-- ext: %o\n", cpu->ir);
-                	goto ri;
-
-				case 0070000:		TR(MUL);
-					RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V|PSW_C);
-              		{
-              			int32_t v1 = (int16_t) DR;
-              			int32_t v2 = (int16_t) cpu->r[reg];
-        	      		prod = v1 * v2;
-						if(prod < -32768 || prod > 32767) {
-							SEC;
-						}
-						if(prod == 0)
-							SEZ;
-						if(prod & B31)
-							SEN;
-
-              			if(reg & 0x1) {
-              				//-- Odd register: store only lower 16 bits
-							cpu->r[reg] = (word) prod;
-            	  		} else {
-        	      			cpu->r[reg + 1] = prod & 0xffff;
-    	          			cpu->r[reg] = (word) (prod >> 16);
-	              		}
-              		}
-					SVC;
-
-				case 0071000:		TR(DIV);
-					RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V|PSW_C);
-					if(reg & 0x1) goto ri;			// for div register must be even
-					{
-						int32_t dv = (int16_t) DR;
-						prod = (uint32_t) cpu->r[reg + 1] | ((uint32_t) cpu->r[reg] << 16);
-						if(DR == 0) {
-							SEC;
-							SEV;
-						} else {
-							ldiv_t d = ldiv(prod, dv);
-							if(d.quot < -32768 || d.quot > 32767) {
-								SEV;
-							} else {
-								cpu->r[reg] = (word) d.quot;
-								cpu->r[reg + 1] = (word) (d.rem);
-							}
-							if(sgn(d.quot))
-								SEN;
-							if(0 == (d.quot & 0xffff))
-								SEZ;
-						}
-					}
-					SVC;
-
-				case 0072000:		TR(ASH);
-                	// ASH
-					RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
-					b = cpu->r[reg];
-					sh = (DR & 0x3f);				// Extract 6 bits
-					if(sh & 0x20) {					// -ve?
-						// we shift right
-						sh = 0x40 - sh;					// +ve shift, 1..62
-               			mask = sgn(b) ? 0xffff : 0x0;	// The previous sign gets shifted in
-                        if(sh >= 17) {
-                        	// Really shifted out completely.
-                			b = mask;
-                			if(mask)
-                				SEC;
-                			else
-                				CLC;
-                			NZ;
-                		} else {
-							if(b & (1 << (sh - 1)))
-								SEC;
-							else
-								CLC;
-							b >>= sh;
-							mask <<= (16 - sh);
-							b |= mask;					// Sign extend
-							b &= 0xffff;
-							NZ;
-							if(b & B15)
-								SEN;
-                		}
-                	} else {
-                		// we shift left
-                		if(sh == 0) {
-                			//-- Nothing -> only set Z and N flags
-                			NZ;
-                		} else if(sh >= 17) {
-                			if(sgn(b))
-                				SEV;
-							b = 0;
-							CLC;
-							SEZ;
-						} else {
-							//-- Loop, to handle overflow correctly: overflow is part of the last step!
-							while(sh-- > 0) {
-								if(b & B15) {
-									SEC;
-								} else {
-									CLC;
-								}
-								uint ob = b;
-								b <<= 1;
-								ob ^= b;
-								if(ob & B15) {					// Sign changed?
-									SEV;
-								}
-							}
-							NZ;
-						}
-                	}
-                	b &= 0xffff;
-					cpu->r[reg] = b;
-					SVC;
-
-              	case 0073000:		TR(ASHC);
-					RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
-              		{
-              			uint32_t val = ((uint32_t) cpu->r[reg] << 16) | cpu->r[reg | 1];	// The bitwise OR is intentional!
-
-						sh = (DR & 0x3f);					// Extract 6 bits
-						if(sh & 0x20) {						// -ve?
-							// we shift right
-							sh = 0x40 - sh;					// +ve shift, 1..62
-        	        		uint32_t msk = val & B31 ? 0xffffffffL : 0x0;
-							if(val & (1 << (sh - 1)))
-								SEC;
-							else
-								CLC;
-							val >>= sh;
-							msk <<= (32 - sh);
-							val |= msk;				// Sign extend
-							if(val == 0)
-								SEZ;
-							if(val & B31)
-								SEN;
-	                	} else {
-							while(sh-- > 0) {
-								if(val & B31) {
-									SEC;
-								} else {
-									CLC;
-								}
-								uint32_t ob = val;
-								val <<= 1;
-								ob ^= val;
-								if(ob & B31) {					// Sign changed?
-									SEV;
-								}
-							}
-							if(val == 0)
-								SEZ;
-							if(val & B31)
-								SEN;
-            	    	}
-						if(reg & 0x1) {
-							cpu->r[reg] = (word) val;		// Truncated result
-						} else {
-							cpu->r[reg] = (word) (val >> 16);
-							cpu->r[reg + 1] = (word) val;
-						}
-					}
-					SVC;
-                	break;
-
-              	case 0074000:		TR(XOR);
-              		RD_U;
-              		cpu->psw &= ~(PSW_N|PSW_Z|PSW_V);
-					b = cpu->r[reg];
-					b = DR ^ b;
-					if(sgn(b)) {
-						SEN;
-					}
-					NZ;
-					WR; SVC;
-
-				case 0077000:		TR(SOB);
-					b = --(cpu->r[reg]);		// decrement reg
-					if(b != 0) {
-						//-- Jump
-						mask = (cpu->ir & 077) << 1;			// Get jump offset (*2)
-						cpu->r[7] -= mask;						// Decrement by offset
-					}
-					SVC;
-			}
-		}
-
-        // All else, or not extended instr
-       	goto ri;
+		// EIS (MUL, DIV, ASH, ASHC, XOR, SOB): not implemented by the 11/20.
+		goto ri;
 	}
 	//-- remaining here is ir=x0xxxx
 
@@ -711,30 +513,13 @@ step(KA11 *cpu)
 		NZ; if((PSW>>3^PSW)&1) SEV;
 		WR; SVC;
 
+	// MTPS/MFPS (0006400/0006700) are 11/34 and LSI-11 instructions,
+	// the 11/20 has no such opcodes.
 	case 0006400:
-		// mtps
-		if(!cpu->allow_mxps || !by)
-			goto ri;
-		TR(MTPS);
-		RD_U;
-		cpu->psw = (cpu->psw & 0xff00) | (DR & 0377);
-		SVC;
-
 	case 0006500:
 	case 0006600:
-		goto ri;
-
 	case 0006700:
-		// mfps
-		if(!cpu->allow_mxps || !by)
-			goto ri;
-		TR(MFPS);
-		by = 0;
-		if(addrop(cpu, dst, 0)) goto be;
-//		RD_U;
-		b = cpu->psw & 0377;
-//		printf("mfps: res=%o\n", b);
-		WR; SVC;
+		goto ri;
 	}
 
 	switch(cpu->ir & 0107400){
