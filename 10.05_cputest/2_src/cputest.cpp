@@ -57,6 +57,8 @@ struct options_t {
     uint16_t switches = 0;
     // instructions to trace before the point of failure
     uint64_t tracelines = 500;
+    // is a BEL on the console the end-of-pass signal? See testbus_c::bell_is_pass.
+    bool bell_is_pass = true;
 };
 
 static void usage(const char *argv0)
@@ -69,6 +71,8 @@ static void usage(const char *argv0)
     fprintf(stderr, "  --ram-words <n>     words of memory below the I/O page\n");
     fprintf(stderr, "  --sw <octal>        console switch register\n");
     fprintf(stderr, "  --tracelines <n>    instructions to trace before a failure (0 = none)\n");
+    fprintf(stderr, "  --bell-is-pass <n>  1 = a BEL on the console ends a pass (default), 0 = not:\n");
+    fprintf(stderr, "                      for a tape which sends the character set as test data\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Settings may also be put in a \"<file.BIN>.opt\" next to the tape, as\n");
     fprintf(stderr, "\"key = value\" lines using the option names without the leading dashes.\n");
@@ -108,6 +112,8 @@ static std::string read_tape_options(const char *tapepath, options_t &opt)
             opt.switches = (uint16_t) strtoul(value, nullptr, 8);
         else if (!strcmp(key, "tracelines"))
             opt.tracelines = strtoull(value, nullptr, 0);
+        else if (!strcmp(key, "bell-is-pass"))
+            opt.bell_is_pass = strtoul(value, nullptr, 0) != 0;
         else {
             char buff[256];
             sprintf(buff, "%s(%u): unknown option \"%s\"", path.c_str(), linenr, key);
@@ -131,7 +137,8 @@ enum result_e {
 static result_e run(testcore_c *core, testbus_c &bus, const options_t &opt, uint64_t trace_from,
                     uint64_t *steps)
 {
-    bus.install();
+    bus.install(core);
+    bus.bell_is_pass = opt.bell_is_pass;
     core->power_reset();
     core->set_switches(opt.switches);
     core->set_pc(start_pc);
@@ -179,6 +186,8 @@ int main(int argc, char **argv)
             opt.switches = (uint16_t) strtoul(v, nullptr, 8), i++;
         } else if (!strcmp(a, "--tracelines")) {
             opt.tracelines = strtoull(v, nullptr, 0), i++;
+        } else if (!strcmp(a, "--bell-is-pass")) {
+            opt.bell_is_pass = strtoul(v, nullptr, 0) != 0, i++;
         } else {
             fprintf(stderr, "%s: unknown option \"%s\"\n", argv[0], a);
             usage(argv[0]);
@@ -208,7 +217,7 @@ int main(int argc, char **argv)
     }
 
     testbus_c bus(opt.ram_words);
-    bus.install();	// the loader reports memory overflows against it
+    bus.install(core);	// the loader reports memory overflows against it
     error = papertape_load(opt.tapepath, bus);
     if (!error.empty()) {
         fprintf(stderr, "%s\n", error.c_str());
@@ -242,7 +251,7 @@ int main(int argc, char **argv)
         delete core;
         core = testcore_c::create(opt.corename);
         testbus_c replay_bus(opt.ram_words);
-        replay_bus.install();
+        replay_bus.install(core);
         error = papertape_load(opt.tapepath, replay_bus);
         if (error.empty()) {
             replay_bus.trace_stream = stdout;

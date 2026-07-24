@@ -67,6 +67,11 @@ public:
         kd11ea_printstate(&kd11ea);
     }
 
+    void setintr(uint16_t vector) override
+    {
+        kd11ea_setintr(&kd11ea, vector);
+    }
+
     state_e get_state(void) override
     {
         return (state_e) kd11ea.state;

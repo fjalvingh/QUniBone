@@ -44,6 +44,19 @@ datob_bus(Bus *bus)
 	return !unibone_datob(bus->addr, bus->data);
 }
 
+enum {
+	PSW_PR = 0340,
+	PSW_T = 020,
+	PSW_N = 010,
+	PSW_Z = 004,
+	PSW_V = 002,
+	PSW_C = 001,
+	// bits actually implemented: <15:14> current mode, <13:12> previous mode,
+	// <7:5> priority, <4> T, <3:0> NZVC. The KD11-EA has no second register
+	// set, so PSW<11> and the unused <10:8> do not exist and always read zero.
+	PSW_MASK = 0170377,
+};
+
 /* Assign the PSW.
  Besides the value itself this switches the stack pointer if the processor
  mode changed, tells the MMU which address space is current now, and tells the
@@ -56,7 +69,12 @@ kd11ea_set_psw(KD11EA *cpu, word newpsw)
 {
 	unsigned oldsp = ((cpu->psw>>14)&3) == KT11D_MODE_KERNEL ?
 			KD11EA_SP_KERNEL : KD11EA_SP_USER;
-	unsigned newsp = ((newpsw>>14)&3) == KT11D_MODE_KERNEL ?
+	unsigned newsp;
+
+	// the bits which have no flipflop can never be loaded, whatever the
+	// source: a write to 777776, MTPS, RTI/RTT or a trap vector.
+	newpsw &= PSW_MASK;
+	newsp = ((newpsw>>14)&3) == KT11D_MODE_KERNEL ?
 			KD11EA_SP_KERNEL : KD11EA_SP_USER;
 
 	if(oldsp != newsp){
@@ -73,15 +91,6 @@ kd11ea_set_psw(KD11EA *cpu, word newpsw)
 
 
 
-
-enum {
-	PSW_PR = 0340,
-	PSW_T = 020,
-	PSW_N = 010,
-	PSW_Z = 004,
-	PSW_V = 002,
-	PSW_C = 001,
-};
 
 enum {
 	TRAP_STACK = 1,
@@ -180,9 +189,9 @@ kd11ea_power_reset(KD11EA *cpu)
 /* The CPU internal registers are decoded on the *physical* address: once
  relocation is on, the IO page is reached through a PAR and the virtual
  address says nothing about which register is meant.
- The 11/34 has no PSW at 777776 - MFPS/MTPS are there instead - but it does
- answer for the KT11-D registers, which are internal to the KD11-EA and are
- therefore not published as QUNIBUS registers of cpu34_c. */
+ Decoded here: the PSW at 777776 (the 11/34 has MFPS/MTPS *as well as* the PSW
+ address, not instead of it) and the KT11-D registers, which are internal to
+ the KD11-EA and are therefore not published as QUNIBUS registers of cpu34_c. */
 static int
 dati(KD11EA *cpu, int b)
 {
@@ -206,7 +215,9 @@ dati(KD11EA *cpu, int b)
 			cpu->bus->data = cpu->sw;
 			goto ok;
 		case 0777776: case 0777777:
-			goto be;
+			// the odd byte reads PSW<15:8>: the caller shifts it down
+			cpu->bus->data = cpu->psw & PSW_MASK;
+			goto ok;
 
 		/* respond but don't return real data */
 		case 0777547:
@@ -259,7 +270,14 @@ trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bus->data);
 			/* can't write switches */
 			goto ok;
 		case 0777776: case 0777777:
-			goto be;
+			// Goes through kd11ea_set_psw(): a write may change the mode,
+			// which switches the stack pointer and the MMU address space,
+			// and PSW<7:5>, which the arbitrator has to be told about.
+			// DATOB writes only the addressed half; mask has it already.
+			// The non-existent bits are dropped by kd11ea_set_psw().
+			kd11ea_set_psw(cpu, (cpu->psw & ~mask) |
+					(cpu->bus->data & mask));
+			goto ok;
 		}
 	}
 
@@ -937,7 +955,14 @@ step(KD11EA *cpu)
 
 	/* Operate */
 	switch(cpu->ir){
-	case 0:	TR(HALT); cpu->state = KD11EA_STATE_HALTED; return;
+	case 0:	TR(HALT);
+		// HALT is kernel-only on the KD11-EA: executed in user mode it is a
+		// reserved instruction and traps through vector 10, leaving the
+		// machine running. Only the 11/20 halts whatever the mode - it has
+		// no modes to begin with.
+		if(!IS_KERNEL(cpu))
+			goto ri;
+		cpu->state = KD11EA_STATE_HALTED; return;
 	case 1:	TR(WAIT); cpu->state = KD11EA_STATE_WAITING; return ; // no traps
 	case 2:
 	case 6:
@@ -956,7 +981,15 @@ step(KD11EA *cpu)
 		SVC;
 	case 3:	TR(BPT); TRAP(014);
 	case 4:	TR(IOT); TRAP(020);
-	case 5:	TR(RESET); kd11ea_reset(cpu); unibone_bus_init() ; SVC;
+	case 5:	TR(RESET);
+		// Like HALT a kernel-only instruction, but this one does not trap:
+		// outside kernel mode RESET is simply a no-op, so a user program
+		// cannot INIT the bus out from under the devices.
+		if(IS_KERNEL(cpu)){
+			kd11ea_reset(cpu);
+			unibone_bus_init();
+		}
+		SVC;
 	}
 
 	// All other instructions should be reserved now

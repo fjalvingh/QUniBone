@@ -30,6 +30,7 @@
 
 #include "cpu_bus_adapter.h"
 #include "testbus.hpp"
+#include "testcore.hpp"
 
 // The cores call free functions, so one instance is "installed" at a time,
 // exactly like unibone_cpu in cpu.cpp.
@@ -40,22 +41,28 @@ testbus_c::testbus_c(unsigned memory_words) :
 {
 }
 
-void testbus_c::install(void)
+void testbus_c::install(testcore_c *core)
 {
     installed_bus = this;
+    this->core = core;
 }
 
-bool testbus_c::mem_deposit(uint16_t addr, uint16_t value)
+bool testbus_c::mem_deposit_byte(uint16_t addr, uint8_t value)
 {
     if ((unsigned)(addr >> 1) >= memory.size())
         return false;
-    memory[addr >> 1] = value;
+    uint16_t w = memory[addr >> 1];
+    if (addr & 1)
+        w = (uint16_t)((w & 0000377) | (value << 8));
+    else
+        w = (uint16_t)((w & 0177400) | value);
+    memory[addr >> 1] = w;
     return true;
 }
 
 void testbus_c::console_put(uint8_t c)
 {
-    if (c == '\a') {
+    if (c == '\a' && bell_is_pass) {
         // MAINDEC: end of pass, no errors. This is the pass criterion.
         bell = true;
         return;
@@ -75,8 +82,10 @@ int testbus_c::io_read(unsigned addr, unsigned *data)
         *data = kl11_rcsr;
         return 1;
     case KL11_RBUF:
-        // no keyboard on this bus: always reads 0, and clears DONE
+        // no keyboard on this bus: always reads 0, and clears DONE with the
+        // interrupt request that goes with it
         kl11_rcsr &= ~0200;
+        kl11_rcv_request = false;
         *data = 0;
         return 1;
     case KL11_XCSR:
@@ -98,17 +107,27 @@ int testbus_c::io_write(unsigned addr, unsigned data)
 {
     switch (addr) {
     case KL11_RCSR:
-        // only the interrupt enable is writable, and nothing can interrupt here
+        // only the interrupt enable is writable
         kl11_rcsr = (uint16_t)((kl11_rcsr & ~0100) | (data & 0100));
+        // enabling with DONE already up requests an interrupt right away; there
+        // is no keyboard here, so DONE never comes up and this never fires
+        kl11_rcv_request = (kl11_rcsr & 0100) && (kl11_rcsr & 0200);
         return 1;
     case KL11_RBUF:
         return 1;	// read only, but answers
     case KL11_XCSR:
         kl11_xcsr = (uint16_t)((kl11_xcsr & ~0100) | (data & 0100) | 0200);
+        // the transmitter is always ready, so enabling the interrupt asks for
+        // one immediately - which is what FKTDA1 arms itself with
+        kl11_xmit_request = (kl11_xcsr & 0100) != 0;
         return 1;
     case KL11_XBUF:
         console_put((uint8_t)(data & 0177));
-        kl11_xcsr |= 0200;	// transmitter ready again immediately
+        // READY drops for the duration of the transmission and comes back up:
+        // instantaneous here, but the interrupt it asks for is not
+        kl11_xcsr |= 0200;
+        if (kl11_xcsr & 0100)
+            kl11_xmit_request = true;
         return 1;
     case KW11_LKS:
         return 1;
@@ -158,6 +177,37 @@ int testbus_c::datob(unsigned addr, unsigned data)
     return io_write(addr, data & 0377);
 }
 
+void testbus_c::bus_init(void)
+{
+    // INIT clears the interrupt enable and the done flag of every device on the
+    // bus. FKTDA1 checks exactly this: it sets KL11 XCSR<6>, executes RESET and
+    // expects the bit to be gone.
+    kl11_rcsr = 0;
+    kl11_xcsr = 0200;	// transmitter ready again, interrupt enable cleared
+    kl11_rcv_request = false;
+    kl11_xmit_request = false;
+}
+
+/* The CPU is between two instructions and lets pending requests in. This stands
+ in for the PRU arbitrator of a real QUniBone: cpu.cpp asks the PRU to GRANT
+ here, and the granted device then sends its vector to cpu_base_c::on_interrupt()
+ from the qunibusadapter thread. Same result, minus the threads - which is what
+ keeps a run repeatable.
+ A device may interrupt only if the CPU is running below its BR level. Within
+ one level the bus grants by position, receiver before transmitter. */
+void testbus_c::grant_interrupts(void)
+{
+    if (core == nullptr || cpu_priority >= KL11_BR_LEVEL)
+        return;
+    if (kl11_rcv_request) {
+        kl11_rcv_request = false;
+        core->setintr(KL11_RCV_VECTOR);
+    } else if (kl11_xmit_request) {
+        kl11_xmit_request = false;
+        core->setintr(KL11_XMIT_VECTOR);
+    }
+}
+
 /*** free functions the emulation cores call, see cpu_bus_adapter.h ***/
 
 extern "C" {
@@ -196,19 +246,21 @@ int unibone_datob(unsigned addr, unsigned data)
     return installed_bus->datob(addr, data);
 }
 
-// Nothing on this bus requests an interrupt, so there is never a GRANT to give.
+// called before every opcode fetch, and while the CPU sits in a WAIT
 void unibone_grant_interrupts(void)
 {
+    installed_bus->grant_interrupts();
 }
 
 void unibone_prioritylevelchange(uint8_t level)
 {
-    (void) level;	// no arbitrator to tell
+    installed_bus->set_cpu_priority(level);
 }
 
-// RESET opcode. No devices to initialize.
+// RESET opcode: pulses bus INIT.
 void unibone_bus_init(void)
 {
+    installed_bus->bus_init();
 }
 
 bool unibone_trace_enabled(void)

@@ -57,6 +57,11 @@ public:
     // dump the registers to stdout
     virtual void printstate(void) = 0;
 
+    // deliver an interrupt vector, as cpu_base_c::on_interrupt() does when a
+    // granted device puts one on the bus. The core takes it before its next
+    // instruction; whether it may is decided by the arbitrator, not here.
+    virtual void setintr(uint16_t vector) = 0;
+
     virtual state_e get_state(void) = 0;
     virtual void set_state(state_e state) = 0;
     virtual uint16_t get_pc(void) = 0;

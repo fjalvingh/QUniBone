@@ -80,14 +80,19 @@ CORE_OBJECTS = \
 
 OBJECTS = $(HARNESS_OBJECTS) $(CORE_OBJECTS)
 
-# Tapes to run. Drop further .BIN files into ../3_tapes/<dir>/ and they are
+# Tapes to run. Drop further tape images into ../3_tapes/<dir>/ and they are
 # picked up here without editing anything.
 #	both/	run against every core
 #	cpu20/	11/20 only
-#	cpu34/	11/34 only, e.g. the KT11-D tests ZKTA/ZKTB
-BOTH_TAPES = $(sort $(wildcard $(VENDOR_MAINDEC_DIR)/ZKA*.BIN) $(wildcard $(TAPE_DIR)/both/*.BIN))
-CPU20_TAPES = $(sort $(wildcard $(TAPE_DIR)/cpu20/*.BIN))
-CPU34_TAPES = $(sort $(wildcard $(TAPE_DIR)/cpu34/*.BIN))
+#	cpu34/	11/34 only, e.g. the KT11-D tests
+# Both extensions in use for the same absolute loader format are matched: .BIN
+# as the paper tape images are named, .BIC as the XXDP distributions name them.
+TAPE_EXTENSIONS = BIN BIC
+tapes_in = $(foreach e,$(TAPE_EXTENSIONS),$(wildcard $(1)/*.$(e)))
+
+BOTH_TAPES = $(sort $(wildcard $(VENDOR_MAINDEC_DIR)/ZKA*.BIN) $(call tapes_in,$(TAPE_DIR)/both))
+CPU20_TAPES = $(sort $(call tapes_in,$(TAPE_DIR)/cpu20))
+CPU34_TAPES = $(sort $(call tapes_in,$(TAPE_DIR)/cpu34))
 
 # stamp path for one (core, tape) pair
 stamp = $(STAMPDIR)/$(1)-$(notdir $(2)).ok

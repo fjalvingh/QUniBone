@@ -88,26 +88,24 @@ std::string papertape_load(const char *filepath, testbus_c &bus)
         if (n == 0)
             continue;
         n -= 6;
-        /* an odd number of data bytes is probably allowed, but we can not do it */
-        if (n & 1)
-            goto botch;
 
+        /* Byte by byte, not word by word: a block may hold an odd number of
+         data bytes, and may start at an odd address. The XXDP .BIC images of
+         the 11/34 diagnostics do both - upstream's loadpt(), which this comes
+         from, gave up on such a block ("paper tape botch"). */
         while (n) {
             if (fread(&lo, 1, 1, f) < 1)
                 goto botch;
             sum += lo;
-            if (fread(&hi, 1, 1, f) < 1)
-                goto botch;
-            sum += hi;
-            if (!bus.mem_deposit(a, (uint16_t)(hi << 8 | lo))) {
+            if (!bus.mem_deposit_byte(a, lo)) {
                 fclose(f);
                 char buff[128];
-                sprintf(buff, "tape loads word to %06o, outside of the %u words of memory", a,
+                sprintf(buff, "tape loads a byte to %06o, outside of the %u words of memory", a,
                         bus.memory_words());
                 return std::string(buff);
             }
-            a += 2;
-            n -= 2;
+            a++;
+            n--;
         }
 
         if (fread(&lo, 1, 1, f) < 1)

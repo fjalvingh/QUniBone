@@ -42,6 +42,8 @@
 #include <string>
 #include <vector>
 
+class testcore_c;
+
 class testbus_c {
 public:
     // The KL11 console. The MAINDECs report "end of pass, no errors" by
@@ -52,24 +54,36 @@ public:
     static const unsigned KL11_RBUF = 0777562;
     static const unsigned KL11_XCSR = 0777564;
     static const unsigned KL11_XBUF = 0777566;
-    // KW11-L line clock. Answers, but never requests an interrupt: nothing on
-    // this bus can, see unibone_grant_interrupts().
+    // Both halves of a KL11 interrupt on BR4, at the standard console vectors.
+    static const unsigned KL11_RCV_VECTOR = 0060;
+    static const unsigned KL11_XMIT_VECTOR = 0064;
+    static const unsigned KL11_BR_LEVEL = 4;
+    // KW11-L line clock. Answers, but never requests an interrupt: it never
+    // ticks, so its MONITOR bit never sets.
     static const unsigned KW11_LKS = 0777546;
 
     explicit testbus_c(unsigned memory_words);
 
-    // make this the instance the unibone_*() functions work on
-    void install(void);
+    // make this the instance the unibone_*() functions work on, and name the
+    // core they deliver interrupt vectors to
+    void install(testcore_c *core);
 
     unsigned memory_words(void) const { return (unsigned) memory.size(); }
-    // Deposit by the tape loader, bypassing the bus.
+    // Deposit by the tape loader, bypassing the bus. A tape block may hold an
+    // odd number of bytes, so the loader works in bytes.
     // "addr" is a 16 bit byte address. Result false: outside of memory.
-    bool mem_deposit(uint16_t addr, uint16_t value);
+    bool mem_deposit_byte(uint16_t addr, uint8_t value);
 
     /*** state observed by the runner ***/
 
     // a BEL was printed: the diagnostic completed a pass without errors
     bool bell = false;
+    // Is a BEL the end-of-pass signal? True for every MAINDEC, but a tape which
+    // exercises the console itself sends the whole character set as data, BEL
+    // included, and would be judged passed on its seventh character. Such a tape
+    // turns this off with "bell-is-pass = 0" in its .opt sidecar, and then has
+    // to be judged by hand - see 3_tapes/cpu34/FKTGC0.BIC.opt.
+    bool bell_is_pass = true;
     // everything else the diagnostic printed, kept back and only shown on failure
     std::string console_output;
 
@@ -87,15 +101,39 @@ public:
     int dati(unsigned addr, unsigned *data);
     int dato(unsigned addr, unsigned data);
     int datob(unsigned addr, unsigned data);
+    // bus INIT, pulsed by the RESET opcode: puts the register stubs back into
+    // their power-up state, which above all clears the interrupt enables.
+    void bus_init(void);
+    // The CPU is at an instruction boundary and lets pending device requests
+    // be granted. This is where the PRU arbitrator's job is done instead.
+    void grant_interrupts(void);
+    // the CPU loaded a new PSW<7:5>
+    void set_cpu_priority(uint8_t level) { cpu_priority = level; }
 
 private:
     // 16 bit word addressed. Physical addresses at or above this are I/O page
     // or non existing memory.
     std::vector<uint16_t> memory;
 
+    // the core interrupt vectors are delivered to, see install()
+    testcore_c *core = nullptr;
+
     // KL11 register state. Only what a diagnostic can observe.
     uint16_t kl11_rcsr = 0;
     uint16_t kl11_xcsr = 0200;	// transmitter ready from the start
+
+    /*** interrupts ***/
+
+    // PSW<7:5> of the CPU, tracked through unibone_prioritylevelchange().
+    // On a BeagleBone this is what cpu.cpp hands to the PRU arbitrator.
+    uint8_t cpu_priority = 0;
+    // Interrupt request flipflops, one per KL11 half. Set when the ready/done
+    // flag comes up with the interrupt enable on, or when the enable is turned
+    // on while the flag is already up. Cleared by the GRANT, by clearing the
+    // enable, and by INIT - a request survives until it is served, but a served
+    // one is not repeated until the device becomes ready again.
+    bool kl11_rcv_request = false;
+    bool kl11_xmit_request = false;
 
     // Result 0 = nobody answered (bus timeout / NXM), 1 = handled.
     int io_read(unsigned addr, unsigned *data);

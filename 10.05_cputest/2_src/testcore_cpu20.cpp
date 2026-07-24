@@ -66,6 +66,11 @@ public:
         ka11_printstate(&ka11);
     }
 
+    void setintr(uint16_t vector) override
+    {
+        ka11_setintr(&ka11, vector);
+    }
+
     state_e get_state(void) override
     {
         return (state_e) ka11.state;

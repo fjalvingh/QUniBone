@@ -193,6 +193,13 @@ The only automated tests in the tree. They run the MAINDEC instruction diagnosti
 emulation cores on the build machine, with no BeagleBone and no backplane involved, and both
 `./compile.sh` and `./crossco` run them after a successful build.
 
+> **The build is currently red on purpose.** The 26 PDP-11/20 runs (13 tapes × 2 cores) pass, as do
+> `FKTBA0`/`FKTCA0`/`FKTDA1` — 29 of 36; the other 7 XXDP 11/34 diagnostics in `3_tapes/cpu34/`
+> still fail, on real defects in the KD11-EA core: an `assert(0)` in `addrop()` that aborts the
+> emulator outright, plus undiagnosed instruction and MMU failures. There is deliberately no
+> expected-failure mechanism to hide them. Full diagnosis in `10.05_cputest/3_tapes/README.md`; use
+> `SKIP_CPUTESTS=1` or `./crossco -n` to build while they are outstanding.
+
 This is possible because a core (`cpu20/ka11.c`, `cpu34/kd11ea.c` + `cpu34/kt11d.c`) is plain C
 that reaches the outside world **only** through the ten `unibone_*()` functions of
 `10.02_devices/2_src/cpu_bus_adapter.h`. `cpu.cpp` implements them on top of `qunibusadapter`, the
@@ -210,18 +217,29 @@ array plus KL11/KW11 register stubs. Nothing in the cores needs changing to be t
 - **Pass criterion**: the diagnostic prints a BEL to the KL11 ("end of pass, no errors"). Failure is
   a CPU HALT (how a MAINDEC reports an error) or hitting the instruction limit. On failure the run
   is replayed with tracing armed just before the end and the trace printed — the fake bus is fully
-  deterministic, so the replay is exact.
+  deterministic (no threads: the KL11 interrupt is granted by `testbus_c` itself, from the core's
+  `unibone_grant_interrupts()` call), so the replay is exact. A tape which exercises the KL11 as a
+  device sends the whole character set as data, BEL included, and must turn the rule off with
+  `bell-is-pass = 0` in its `.opt` sidecar — `cpu34/FKTGC0.BIC` is the one such tape.
 - **Stamp driven**: one stamp per (core, tape) under `10.05_cputest/4_deploy/stamps/`, depending on
   the tape and on the `cputest` binary. An ordinary build re-runs nothing; touching a core or the
   harness re-runs all pairs (both cores live in one binary, so the granularity is per binary, not
   per core). A full run is ~80 s serial, ~12 s with `-j`, which is what the build scripts pass.
 - Skip with `./crossco -n` or `SKIP_CPUTESTS=1`.
 
-Adding tapes needs no code change: drop `.BIN` images into `10.05_cputest/3_tapes/both|cpu20|cpu34/`
-and they are picked up by wildcard. The 13 vendored 11/20 diagnostics ZKAAA0…ZKAMA0 are wired in
-from `10.02_devices/2_src/cpu20/pdp11-master/maindec/` and run against both cores. Per-tape
-settings go in a `<tape>.BIN.opt` sidecar. Note the ZKA* set predates the 11/34, so nothing
-currently covers EIS, MFPS/MTPS or the KT11-D — dropping in ZKDA…ZKDJ and ZKTA/ZKTB would.
+Adding tapes needs no code change: drop images into `10.05_cputest/3_tapes/both|cpu20|cpu34/` and
+they are picked up by wildcard. **Both `.BIN` and `.BIC` are matched** — the same absolute loader
+format, named differently by paper tape archives and by XXDP distributions. The 13 vendored 11/20
+diagnostics ZKAAA0…ZKAMA0 are wired in from `10.02_devices/2_src/cpu20/pdp11-master/maindec/` and
+run against both cores. Per-tape settings go in a `<tape>.opt` sidecar.
+
+The loader (`papertape.cpp`) works byte by byte, not word by word: a block may carry an odd number
+of data bytes or start at an odd address, which the XXDP images do and which upstream's `loadpt()`
+rejected as a "paper tape botch".
+
+Coverage: ZKA\* covers the 11/20 base instruction set on both cores. The 11/34 specifics — EIS,
+MFPS/MTPS, the KT11-D — are covered by the XXDP `FKA*`/`FKT*` tapes in `3_tapes/cpu34/`, which are
+wired in but failing; see the warning above.
 
 ## Change log
 
