@@ -188,8 +188,21 @@ void qunibusdevice_c::set_register_dati_value(qunibusdevice_register_t *device_r
  device_reg->pru_iopage_register->value = value;
  }
  */
+// get value of QBUS/UNIBUS register as visible to a DATI
+// For "active" registers device logic must come through here (or read
+// active_dati_flipflops directly), never through pru_iopage_register->value:
+// qunibusadapter's DATO event handling restores that shared value
+// non-atomically against device threads.
+uint16_t qunibusdevice_c::get_register_dati_value(qunibusdevice_register_t *device_reg)
+{
+	if (device_reg->active_on_dati || device_reg->active_on_dato)
+		return device_reg->active_dati_flipflops;
+	else
+		return device_reg->pru_iopage_register->value;
+}
+
 // get value of QBUS/UNIBUS register which has been written by DATO
-uint16_t qunibusdevice_c::get_register_dato_value(qunibusdevice_register_t *device_reg) 
+uint16_t qunibusdevice_c::get_register_dato_value(qunibusdevice_register_t *device_reg)
 {
 	if (device_reg->active_on_dato)
 		return device_reg->active_dato_flipflops;
@@ -223,6 +236,8 @@ void qunibusdevice_c::log_register_event(const char *change_info,
 {
 	// do not use std:: string .. hand coded because of performance
 	char buffer[1024];
+	char *wp = buffer; // write position
+	char *wend = buffer + sizeof(buffer);
 	unsigned i;
 
 	if (logger->ignored(this, LL_DEBUG))
@@ -232,31 +247,32 @@ void qunibusdevice_c::log_register_event(const char *change_info,
 
 	// event info could be like "DATI CS" or "CHNG DA"
 	if (change_info)
-		strcat(buffer, change_info);
-	if (changed_reg) {
-		strcat(buffer, " ");
-		strcat(buffer, changed_reg->name);
-	}
-	if (change_info || changed_reg)
-		strcat(buffer, ":");
+		wp += snprintf(wp, wend - wp, "%s", change_info);
+	if (changed_reg && wp < wend)
+		wp += snprintf(wp, wend - wp, " %s", changed_reg->name);
+	if ((change_info || changed_reg) && wp < wend)
+		wp += snprintf(wp, wend - wp, ":");
 
 	// dump all registers.
 	// if too much (examples: memory emulator): only the changed register
 	if (register_count <= 8) {
-		for (i = 0; i < register_count; i++) {
-			char buff1[80];
+		for (i = 0; i < register_count && wp < wend; i++) {
 			qunibusdevice_register_t *reg = &(registers[i]);
 			if (reg->active_on_dati || reg->active_on_dato)
-				sprintf(buff1, " %s=%06o/%06o", reg->name, reg->pru_iopage_register->value,
-						reg->active_dato_flipflops);
+				wp += snprintf(wp, wend - wp, " %s=%06o/%06o", reg->name,
+						reg->pru_iopage_register->value, reg->active_dato_flipflops);
 			else
-				sprintf(buff1, " %s=%06o", reg->name, reg->pru_iopage_register->value);
-			strcat(buffer, buff1);
+				wp += snprintf(wp, wend - wp, " %s=%06o", reg->name,
+						reg->pru_iopage_register->value);
 		}
 	} else {
 		// only the changed register
-		sprintf(buffer, "%s=%06o", changed_reg->name, changed_reg->pru_iopage_register->value);
+		snprintf(buffer, sizeof(buffer), "%s=%06o", changed_reg->name,
+				changed_reg->pru_iopage_register->value);
 	}
+	// DEBUG_FAST copies the text as the (late evaluated) format string itself;
+	// a "%s" arg would only store the stack buffer's address. Register names
+	// and octal values contain no '%'.
 	DEBUG_FAST(buffer);
 }
 
@@ -283,22 +299,22 @@ qunibusdevice_c *qunibusdevice_c::find_by_request_slot(uint8_t priority_slot)
 
 // returns a string of form
 // reg_first-reg_last, slots from-to, DMA, INTR level1/vec1,level2/vec2,...
-char *qunibusdevice_c::get_qunibus_resource_info(void) 
+char *qunibusdevice_c::get_qunibus_resource_info(void)
 {
-	static char buffer[1024];
-	char tmpbuff[256];
+	static char buffer[1024]; // single menu thread only, not reentrant
+	char *wp = buffer; // write position
+	char *wend = buffer + sizeof(buffer);
 	buffer[0] = 0;
 
 	// get register address range
 	// use parameter "base_addr", register struct only valid after qunibusadapter.install()
-	if (register_count == 0)  // cpu is a device without register interface
-		strcpy(tmpbuff, "");
-	else if (register_count == 1)
-		sprintf(tmpbuff, "addr %s", qunibus->addr2text(base_addr.value));
-	else
-		sprintf(tmpbuff, "addr %s-%s (%d regs)", qunibus->addr2text(base_addr.value),
+	if (register_count == 1)
+		wp += snprintf(wp, wend - wp, "addr %s", qunibus->addr2text(base_addr.value));
+	else if (register_count > 1)
+		wp += snprintf(wp, wend - wp, "addr %s-%s (%d regs)",
+				qunibus->addr2text(base_addr.value),
 				qunibus->addr2text(base_addr.value + 2 * (register_count - 1)), register_count);
-	strcat(buffer, tmpbuff);
+	// register_count == 0: cpu is a device without register interface
 
 	// get priority slot range from DMA request and intr_requests
 	uint8_t slot_from = 0xff, slot_to = 0;
@@ -315,32 +331,34 @@ char *qunibusdevice_c::get_qunibus_resource_info(void)
 
 	if (slot_from > slot_to) // no requests: use device parameter
 		slot_from = slot_to = priority_slot.value;
-	if (slot_from == slot_to)
-		sprintf(tmpbuff, ", slot %u", (unsigned) slot_from);
-	else
-		sprintf(tmpbuff, ", slots %u-%u", (unsigned) slot_from, (unsigned) slot_to);
-	strcat(buffer, tmpbuff);
+	if (wp < wend) {
+		if (slot_from == slot_to)
+			wp += snprintf(wp, wend - wp, ", slot %u", (unsigned) slot_from);
+		else
+			wp += snprintf(wp, wend - wp, ", slots %u-%u", (unsigned) slot_from,
+					(unsigned) slot_to);
+	}
 
 	//  DMA channels
-	if (dma_requests.size() > 0) {
+	if (dma_requests.size() > 0 && wp < wend) {
 		if (dma_requests.size() == 1)
-			sprintf(tmpbuff, ", DMA");
+			wp += snprintf(wp, wend - wp, ", DMA");
 		else
-			sprintf(tmpbuff, ", %uxDMA", dma_requests.size());
-		strcat(buffer, tmpbuff);
+			wp += snprintf(wp, wend - wp, ", %uxDMA", (unsigned) dma_requests.size());
 	}
 	//  Interrupts
 	if (intr_requests.size() > 4) {
 		// that crazy testcontroller has 31*4 !
-		sprintf(tmpbuff, "%d INTRs", intr_requests.size());
-		strcat(buffer, tmpbuff);
+		if (wp < wend)
+			wp += snprintf(wp, wend - wp, "%u INTRs", (unsigned) intr_requests.size());
 	} else if (intr_requests.size() > 0) {
 		const char *sep = ":";
-		strcat(buffer, ", INTRs");
+		if (wp < wend)
+			wp += snprintf(wp, wend - wp, ", INTRs");
 		for (std::vector<intr_request_c *>::iterator it = intr_requests.begin();
-				it < intr_requests.end(); it++) {
-			sprintf(tmpbuff, "%s%d/%03o", sep, (*it)->get_level(), (*it)->get_vector());
-			strcat(buffer, tmpbuff);
+				it < intr_requests.end() && wp < wend; it++) {
+			wp += snprintf(wp, wend - wp, "%s%d/%03o", sep, (*it)->get_level(),
+					(*it)->get_vector());
 			sep = ",";
 		}
 	}

@@ -316,7 +316,6 @@ void logger_c::set_fifo_size(unsigned size)
 //	false: printf evaluated immediately, no arguemnt restrictions
 //	true : put uint32 args and fmt into queue, printf at dump
 
-volatile int m1 = 0;
 void logger_c::vlog(logsource_c *logsource, unsigned msglevel, bool late_evaluation, const char *srcfilename,
                     unsigned srcline, const char *fmt, va_list args)
 {
@@ -325,9 +324,6 @@ void logger_c::vlog(logsource_c *logsource, unsigned msglevel, bool late_evaluat
         return; // don't output
 
     fifo_mutex.lock();
-//	pthread_mutex_lock (&mutex);
-    assert(!m1);
-    m1++;
 
     gettimeofday(&msg.timestamp, NULL);
     msg.id = messagecount++;
@@ -385,9 +381,7 @@ void logger_c::vlog(logsource_c *logsource, unsigned msglevel, bool late_evaluat
         // cout << string(msgtext) << "\n"; // not thread safe???
     }
 
-    m1--;
     fifo_mutex.unlock();
-//	pthread_mutex_unlock (&mutex);
 
     // stop program
     if (msglevel == LL_FATAL) {

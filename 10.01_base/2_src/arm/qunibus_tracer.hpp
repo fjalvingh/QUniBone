@@ -37,6 +37,7 @@
 #define _QUNIBUS_TRACER_HPP_
 
 
+#include <bitset>
 #include <vector>
 #include <string>
 
@@ -68,17 +69,18 @@ public:
                && (cycle_mask & (1 << _cycle)) ;
     }
     char *to_string() {
-        static char buff[255] ; // how C-ish !
+        static char buff[255] ; // single menu thread only, not reentrant
+        int n ;
         if (address_from == address_to)
-            sprintf(buff, "%06o on ", address_to) ;
+            n = snprintf(buff, sizeof(buff), "%06o on ", address_to) ;
         else
-            sprintf(buff, "%06o-%06o on ", address_from, address_to) ;
+            n = snprintf(buff, sizeof(buff), "%06o-%06o on ", address_from, address_to) ;
         if (cycle_mask & TRIGGER_DATI)
-            strcat(buff, "DATI ") ;
+            n += snprintf(buff + n, sizeof(buff) - n, "DATI ") ;
         if (cycle_mask & TRIGGER_DATO)
-            strcat(buff, "DATO ") ;
+            n += snprintf(buff + n, sizeof(buff) - n, "DATO ") ;
         if (cycle_mask & TRIGGER_DATOB)
-            strcat(buff, "DATOB ") ;
+            n += snprintf(buff + n, sizeof(buff) - n, "DATOB ") ;
         return buff ;
     }
 } ;
@@ -136,14 +138,14 @@ public:
 class tracer_c {
 public:
     bool enabled ; // to be evaluated?
-    bool	addr[0x10000] ; // one flag per logical 16 bit address
+    std::bitset<0x10000> addr ; // one flag per logical 16 bit address
     tracer_c() {
         clear() ;
     }
 
     void clear() {
         enabled = false ;
-        memset(addr, 0, sizeof(addr)) ;
+        addr.reset() ;
     }
     // enable address range for tracing
     void enable(uint16_t addr_from, uint16_t addr_to) {
@@ -152,13 +154,9 @@ public:
             addr[i] = true ;
     }
     void disable(uint16_t addr_from, uint16_t addr_to) {
-        unsigned i ;
-        for (i=addr_from ; i <= addr_to ; i++)
+        for (unsigned i=addr_from ; i <= addr_to ; i++)
             addr[i] = false ;
-        enabled = false ; // any conditions set?
-        for (i=0 ;! enabled &&  (i < 0x10000) ; i++)
-            if (addr[i])
-                enabled = true ;
+        enabled = addr.any() ; // any conditions set?
     }
 } ;
 

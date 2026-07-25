@@ -46,17 +46,11 @@
  */
 #define _UNIBUSADAPTER_CPP_
 
-//#include <iostream>
-//#include <fstream>
 #include <ios>
 #include <string.h>
 #include <pthread.h>
 #include <assert.h>
 #include <queue>
-
-// TEST
-//#include <unistd.h> // sleep()
-//#include <sys/time.h>
 
 #include "logsource.hpp"
 #include "logger.hpp"
@@ -71,8 +65,6 @@
 
 qunibusadapter_c *qunibusadapter; // another Singleton
 // is registered in device_c.list<devices> ... order of static constructor calls ???
-
-bool qunibusadapter_debug_flag = 0;
 
 // encode signal bit for PRU from BR/NPR level.
 // index is one of PRIORITY_LEVEL_INDEX_*
@@ -99,7 +91,7 @@ qunibusadapter_c::qunibusadapter_c() :     device_c()
     line_DCLO = false;
     line_ACLO = false;
 
-    requests_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_init(&requests_mutex, NULL);
 
     requests_init();
 
@@ -249,8 +241,6 @@ bool qunibusadapter_c::register_device(qunibusdevice_c& device)
         uint32_t addr = device.base_addr.value + 2 * i; // devices have always sequential address register range!
         IOPAGE_REGISTER_ENTRY(*pru_iopage_registers,addr)= register_handle;
 
-// printf("!!! register @0%06o = reg 0x%x\n", addr, reghandle) ;
-
         register_handle++;
     }
     // if its a CPU, switch PRU to "with_CPU"
@@ -259,8 +249,6 @@ bool qunibusadapter_c::register_device(qunibusdevice_c& device)
         assert(registered_cpu == NULL); // only one allowed!
         registered_cpu = cpu;
         // enable/disable will start/stop CPU arbitrator on PRU
-//		mailbox->cpu_enable = 1;
-//		mailbox_execute(ARM2PRU_CPU_ENABLE);
     }
     return true;
 }
@@ -393,9 +381,6 @@ bool qunibusadapter_c::request_schedule(priority_request_c& request)
                     (unsigned )request.level_index);
                 return false;
             }
-            // DEBUG("request_schedule(): update request %p into level %u, slot %u",&request, request.level_index, request.slot);
-        } else {
-            //	DEBUG("request_schedule(): insert request %p into level %u, slot %u",&request, request.level_index, request.slot);
         }
     }
 
@@ -432,15 +417,6 @@ void qunibusadapter_c::requests_cancel_scheduled(void)
             }
     }
 }
-
-/*
- // is a request of given level active on the PRU?
- bool qunibusadapter_c::request_is_active(unsigned level_index) {
- // Must run under  pthread_mutex_lock(&requests_mutex);
- priority_request_level_c *prl = &request_levels[level_index];
- return (prl->active != NULL);
- }
- */
 
 // find highest prioritized request for a given level, via slots
 priority_request_c *qunibusadapter_c::request_activate_lowest_slot(unsigned level_index) 
@@ -603,14 +579,11 @@ void qunibusadapter_c::request_active_complete(unsigned level_index, bool signal
     // DEBUG_FAST("request_active_complete") ;
 
     unsigned slot = prl->active->priority_slot;
-    //if (prl->slot_request[slot] != prl->active)
-    //	mailbox_execute(ARM2PRU_HALT) ; // LA: trigger on timeout REG_WRITE
     // active not in table, if table cleared by  INIT	requests_cancel_scheduled()
     assert(prl->slot_request[slot] == prl->active); // must still be in table
 
     // mark as complete
     prl->active->executing_on_PRU = false;
-//	prl->active->complete = true;
     // remove table entries
     prl->slot_request[slot] = NULL; // clear slot from request
     prl->slot_request_mask &= ~(1 << slot); // mask out slot bit
@@ -694,7 +667,6 @@ void qunibusadapter_c::DMA(dma_request_c& dma_request, bool blocking, uint8_t qu
         return;
     }
     if (!prl->active) {
-//	if (!request_is_active(dma_request.level_index)) {
         // no device_DMA current performed: start immediately
         // else triggered by PRU signals
         request_activate_lowest_slot(dma_request.level_index);
@@ -708,17 +680,12 @@ void qunibusadapter_c::DMA(dma_request_c& dma_request, bool blocking, uint8_t qu
         // NO wait for PRU signal, instead busy waiting. CPU thread blocked.
         // Reason: SPEED. CPU does high frequency single word accesses.
         bool completed = false;
-// ARM_DEBUG_PIN1(1); // CPU20 performace
         do {
             // CPU thread is now spinning
             // wait until CPU access scheduled and processed on PRU
             // in parallel, other device threads call DMA()
             pthread_mutex_lock(&requests_mutex);
             dma_request_c *activereq = dynamic_cast<dma_request_c *>(prl->active);
-//if (activereq == &dma_request)
-//	printf("a\n") ;
-//if (DMA_STATE_IS_COMPLETE(mailbox->dma.cur_status))
-//	printf("b\n") ;
             if ((activereq == &dma_request) && !EVENT_IS_ACKED(*mailbox, dma)) {
                 assert(activereq->is_cpu_access);
                 // transfer DATI data to buffer, set success flag, schedule next request
@@ -728,9 +695,8 @@ void qunibusadapter_c::DMA(dma_request_c& dma_request, bool blocking, uint8_t qu
             } else if (activereq == NULL)
                 // request aborted by worker_power_event()
                 completed = true;
-            pthread_mutex_unlock(&requests_mutex); //&dma_request.complete_mutex);
+            pthread_mutex_unlock(&requests_mutex);
         } while (!completed);
-//ARM_DEBUG_PIN1(0); // CPU20 performace
 
     } else if (blocking) {
         pthread_mutex_lock(&dma_request.complete_mutex);
@@ -785,7 +751,6 @@ void qunibusadapter_c::INTR(intr_request_c& intr_request,
 
     priority_request_level_c *prl = &request_levels[intr_request.level_index];
     pthread_mutex_lock(&requests_mutex); // lock schedule table operations
-//if (intr_request.device->log_level == LL_DEBUG)
     DEBUG_FAST("INTR() req: dev %s, slot/level/vector= %d/%d/%03o",
           intr_request.device->name.value.c_str(), (unsigned ) intr_request.priority_slot,
           intr_request.level_index + 4, intr_request.vector);
@@ -861,15 +826,6 @@ void qunibusadapter_c::INTR(intr_request_c& intr_request,
     }
 
     pthread_mutex_unlock(&requests_mutex);  // work on schedule table finished
-
-    /*
-     // If INTR() is blocking: Wait for request to finish.
-     pthread_mutex_lock(&intr_request.mutex);
-     while (!intr_request.complete) {
-     pthread_cond_wait(&intr_request.complete_cond, &intr_request.mutex);
-     }
-     pthread_mutex_unlock(&intr_request.mutex);
-     */
 }
 
 /* A device may cancel an INTR request, if not yet GRANTed by Arbitrator.
@@ -1020,7 +976,8 @@ void qunibusadapter_c::worker_deviceregister_event()
         //	restore value accessible by DATI
         device_reg->pru_iopage_register->value = device_reg->active_dati_flipflops;
         // Restauration of pru_iopage_register->value IS NOT ATOMIC against device logic threads.
-        // Devices must use only reg->active_dati_flipflops !
+        // Devices must use only reg->active_dati_flipflops,
+        // via qunibusdevice_c::get_register_dati_value() !
         switch (unibus_control) {
         case QUNIBUS_CYCLE_DATO:
             // write into a register with separate read/write flipflops
@@ -1198,7 +1155,6 @@ void qunibusadapter_c::worker(unsigned instance)
          band value to indicate error (and it can wrap around to 0 if you
          run the program just a whole lot of times). */
         res = prussdrv_pru_wait_event_timeout(PRU_EVTOUT_0, 100000/*us*/);
-//res = prussdrv_pru_wait_event(PRU_EVTOUT_0);
         // PRU may have raised more than one event before signal is accepted.
         // single combination of only INIT+DATI/O possible
         prussdrv_pru_clear_event(PRU_EVTOUT_0, PRU0_ARM_INTERRUPT);

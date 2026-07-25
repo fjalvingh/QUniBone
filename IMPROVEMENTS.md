@@ -223,7 +223,7 @@ identical parts into a shared `cpu_core_common` include, or add a maintenance no
 the top of both files listing the sections that must be patched in tandem. The current
 situation has already produced one divergence bug.
 
-### 4.2 ka11.c exports generic symbol names into a mixed binary
+### 4.2 ka11.c exports generic symbol names into a mixed binary — FIXED 2026-07-25
 
 `dati_bus`, `dato_bus`, `datob_bus`, `levelchange`, `sgn`, `sxt`, `step`, `run` in
 `ka11.c` have external linkage (and `sgn`/`sxt` are declared in `cpu20/11.h`), while
@@ -231,14 +231,14 @@ kd11ea deliberately made its copies `static` because "this core is linked into t
 binary". `step()` and `run()` are especially collision-prone names. Make everything not
 in `ka11.h` static, matching the cpu34 convention.
 
-### 4.3 Legacy declarations in cpu20/11.h
+### 4.3 Legacy declarations in cpu20/11.h — FIXED 2026-07-25
 
 `cpu20/11.h:30-87` still declares `dial()`, `serve()`, `nodelay()`, `Memory`, `KE11`
 and their bus functions from the standalone aap-emulator — none exist in this tree.
 Dead declarations invite linking the wrong thing; trim both `11.h` copies to what the
 cores actually use (they are also 90 % identical to each other, see 4.1).
 
-### 4.4 String building with unchecked strcpy/strcat/sprintf
+### 4.4 String building with unchecked strcpy/strcat/sprintf — FIXED 2026-07-25
 
 Recurring pattern: `cpu.cpp:379-385` (`stop()` even builds a *format string* from the
 `info` argument — an `info` containing `%` would crash), `qunibusdevice.cpp:210-250`
@@ -248,14 +248,14 @@ today, but they are the first place a refactor will silently overflow. Use snpri
 with sizes, and in `stop()` print `info` as an argument (`INFO("%s at %06o", info, pc)`),
 never as format.
 
-### 4.5 Duplicated OBJECTS lists in makefile_u / makefile_q
+### 4.5 Duplicated OBJECTS lists in makefile_u / makefile_q — FIXED 2026-07-25
 
 Adding a device requires editing two makefiles that differ only in a handful of
 bus-specific lines (CLAUDE.md even has to warn about it). Move the common `$(OBJECTS)`
 and rules into a `makefile.common` included by both, keeping only the `_u`/`_q` deltas
 in the per-bus files. Same for the two `11.h`s (4.3).
 
-### 4.6 Commented-out code and stale experiment blocks in the hot files
+### 4.6 Commented-out code and stale experiment blocks in the hot files — FIXED 2026-07-25
 
 `qunibusadapter.cpp`, `cpu.cpp`, `ka11.c`, `kd11ea.c` carry a lot of `//`-disabled
 experiments (breakpoint hacks with hardcoded addresses, old ZRXF trigger setups inside
@@ -263,7 +263,7 @@ experiments (breakpoint hacks with hardcoded addresses, old ZRXF trigger setups 
 logger). Each one is noise exactly where the threading is trickiest. Delete or move
 behind a proper `#ifdef` with a name that says what it is for.
 
-### 4.7 Minor consistency items
+### 4.7 Minor consistency items — FIXED 2026-07-25
 
 - `qunibusadapter_c` copies the `PTHREAD_*_INITIALIZER`-by-assignment idiom
   (`qunibusadapter.cpp:102`, `priorityrequest.cpp:41-42`); it works in C++ but

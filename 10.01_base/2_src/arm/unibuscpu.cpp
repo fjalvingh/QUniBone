@@ -35,38 +35,19 @@ void unibuscpu_c::on_power_changed(signal_edge_enum aclo_edge, signal_edge_enum 
 	if (aclo_edge == SIGNAL_EDGE_RAISING) {    
 		INFO("CPU: ACLO active");
 		power_event_ACLO_active = true ;
-	} else if (dclo_edge == SIGNAL_EDGE_RAISING) {    
+	} else if (dclo_edge == SIGNAL_EDGE_RAISING) {
 		INFO("CPU: DCLO active");
 		power_event_DCLO_active = true ;
-//			ka11_pwrfail_trap(&unibone_cpu->ka11);
-		// ACLO failed. 
-			// CPU traps to vector 24 and has 2ms time to execute code
+		// ACLO failed.
+		// CPU traps to vector 24 and has 2ms time to execute code
 	} else if (aclo_edge == SIGNAL_EDGE_FALLING) {
 		INFO("CPU: ACLO inactive");
 		 power_event_ACLO_inactive = true;
-//			ka11_pwrup_vector_fetch(&unibone_cpu->ka11);
 		// DCLO restored
-		// CPU loads PC and PSW from vector 24 
+		// CPU loads PC and PSW from vector 24
 		// if HALTed: do nothing, user is expected to setup PC and PSW ?
-	} 
-// cleared only by cpu after processing	
-// else power_event = power_event_none ;
-		
-/*	 	
-		
-
-on DCLO: set INIT
-on ACLO: init, timeout, 
-set "power_up_pending"
-
-On start (rmeove of HALT):
-if (power_up_pending) fect 24/26, start executiuon
-
-fetch vector 24/26,
-
-//assert(dbg==0) ;
-	if (power_down) { // power-on defaults
-*/
+	}
+	// power_event_* flags cleared only by cpu worker after processing
 }
 
 // QBUS/UNIBUS INIT: clear all registers

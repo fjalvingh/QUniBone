@@ -2,6 +2,19 @@
 
 Notable changes to QUniBone, newest first.
 
+### One shared makefile for the UNIBUS and QBUS builds
+
+Adding a device used to require editing `10.03_app_demo/2_src/makefile_u` **and** `makefile_q`,
+two files identical except for a handful of bus-specific lines — an invitation to update one and
+forget the other. The shared `$(OBJECTS)` list and all build rules now live in
+`10.03_app_demo/2_src/makefile.common`; `makefile_u`/`makefile_q` shrink to the per-bus deltas
+(`-DUNIBUS`/`-DQBUS`, the `pru1_u`/`pru1_q` firmware, `4_deploy_u`/`4_deploy_q`, and the
+UNIBUS-only m9312/ke11 devices). A new device's `.o` goes into `makefile.common` once, for both
+buses. The top-level `Makefile` dispatch on `QUNIBONE_PLATFORM` is unchanged.
+
+**Verified**: cross-compile only (`./crossco -a` for UNIBUS plus a `make -n` dry run of the QBUS
+makefile), no hardware run.
+
 ### The CPU test suite: work in progress
 
 ### XXDP diagnostics for the 11/34 in the CPU test suite

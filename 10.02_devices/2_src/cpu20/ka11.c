@@ -1,3 +1,9 @@
+/* ka11.c: PDP-11/20 (KA11) CPU emulation core, Angelo Papenhoff's KA11.
+
+ All symbols are either static or prefixed ka11_/KA11: this core is linked
+ into the same binary as the KD11-EA core of the 11/34 (cpu34/kd11ea.c).
+ */
+
 #include "11.h"
 #include "ka11.h"
 #include <stdlib.h>
@@ -6,7 +12,7 @@
 
 // unibone_*() declared in cpu_bus_adapter.h, included via 11.h
 
-int
+static int
 dati_bus(Bus *bus)
 {
 	unsigned int data;
@@ -16,19 +22,19 @@ dati_bus(Bus *bus)
 	return 0;
 }
 
-int
+static int
 dato_bus(Bus *bus)
 {
 	return !unibone_dato(bus->addr, bus->data);
 }
 
-int
+static int
 datob_bus(Bus *bus)
 {
 	return !unibone_datob(bus->addr, bus->data);
 }
 
-void
+static void
 levelchange(word psw)
 {
 	unibone_prioritylevelchange(psw>>5);
@@ -59,13 +65,13 @@ enum {
 #define ISSET(f) ((cpu->psw&(f)) != 0)
 
 
-word
+static word
 sgn(word w)
 {
 	return (w>>15)&1;
 }
 
-word
+static word
 sxt(byte b)
 {
 	return (word)(int8_t)b;
@@ -132,7 +138,7 @@ ka11_reset(KA11 *cpu)
 		bd->reset(bd->dev);
 }
 
-int
+static int
 dati(KA11 *cpu, int b)
 {
 	if(!b && cpu->ba&1)
@@ -171,7 +177,7 @@ be:
 	return 1;
 }
 
-int
+static int
 dato(KA11 *cpu, int b)
 {
 if (unibone_trace_addr(cpu->ba)) // default: all
@@ -320,7 +326,7 @@ setnz(KA11 *cpu, word w)
 	if(w == 0) cpu->psw |= PSW_Z;
 }
 
-void
+static void
 step(KA11 *cpu)
 {
 	uint by;
@@ -331,9 +337,6 @@ step(KA11 *cpu)
 	word mask, sign;
 	int inhov;
 	byte oldpsw;
-
-//	printf("fetch from %06o\n", cpu->r[7]);
-//	printstate(cpu);
 
 #define SP	cpu->r[6]
 #define PC	cpu->r[7]
@@ -374,8 +377,6 @@ step(KA11 *cpu)
 #define INA(a,d)	cpu->ba = a; if(dati(cpu, 0)) goto be; d = cpu->bus->data
 #define TR(m)	if (unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"\n", PC-2)
 #define TRB(m)	if (unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"%s\n", PC-2, by ? "B" : "")
-//#define TR(m)	trace("EXEC [%06o] "#m"\n", PC-2)
-//#define TRB(m)	trace("EXEC [%06o] "#m"%s\n", PC-2, by ? "B" : "")
 
 	inhov = 0;
 
@@ -387,19 +388,10 @@ step(KA11 *cpu)
 		cpu->external_intr = 0 ;
 		pthread_mutex_unlock(&cpu->mutex) ;
 		if (external_intr){
-			//ARM_DEBUG_PIN1(0);	// INTR processed
 			cpu->state = KA11_STATE_RUNNING ;
 			TRAP(external_intrvec);
-		}	
+		}
 	}
-
-//	if(cpu->r[7] == 016440) {
-//	 	cpu->state = KA11_STATE_HALTED;
-//	 	printf("\nUB BREAKPOINT\n");
-//	 	printf("R0 %06o R1 %06o R2 %06o R3 %06o R4 %06o R5 %06o R6 %06o R7 %06o\n", cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3], cpu->r[4], cpu->r[5], cpu->r[6], cpu->r[7]);
-//	 	printf("ba %06o ir %06o psw %06o\n", cpu->ba, cpu->ir, cpu->psw);
-//	 	return;
-//	}
 
 	oldpsw = PSW;
 	INA(PC, cpu->ir);
@@ -426,8 +418,6 @@ step(KA11 *cpu)
 	case 0120000: case 0020000:	TRB(CMP);
 		RD_B; CLCV;
 		b = SR + W(~DR) + 1; NC; BXT;
-//		if(cpu->ir == 021527)
-//			printf("cmp (r5),xx -> %o vs %o\n", SR, DR);
 		if(sgn((SR ^ DR) & ~(DR ^ b))) SEV;
 		NZ; SVC;
 	case 0130000: case 0030000:	TRB(BIT);
@@ -681,8 +671,6 @@ ka11_setintr(KA11 *cpu, unsigned vec)
 	cpu->external_intr = true;
 	cpu->external_intrvec = vec;
 	trace("INTR vec=%03o\n", vec) ;
-//	if (cpu->state == KA11_STATE_WAITING) // atomically
-//		cpu->state = KA11_STATE_RUNNING ;
 	pthread_mutex_unlock(&cpu->mutex) ;
 }
 
@@ -725,16 +713,4 @@ ka11_condstep(KA11 *cpu)
 		svc(cpu, cpu->bus);
 		step(cpu);
 	}
-}
-
-void
-run(KA11 *cpu)
-{
-	cpu->state = KA11_STATE_RUNNING;
-	
-	while(cpu->state != KA11_STATE_HALTED){
-		ka11_condstep(cpu);
-	}
-
-	ka11_printstate(cpu);
 }

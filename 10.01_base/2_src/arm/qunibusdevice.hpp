@@ -151,6 +151,7 @@ public:
 	// access the value of a register in shared UNIBUS PRU space
 	void set_register_dati_value(qunibusdevice_register_t *device_reg, uint16_t value,
 			const char *debug_info);
+	uint16_t get_register_dati_value(qunibusdevice_register_t *device_reg);
 	uint16_t get_register_dato_value(qunibusdevice_register_t *device_reg);
 	void reset_unibus_registers();
 

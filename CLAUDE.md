@@ -116,9 +116,12 @@ Compile everything (PRU firmware + the `demo` ARM binary):
 remote-debug setups reference `QUNIBONE_DIR`, `BBB_CC`, `PRU_CGT`.
 
 Under the hood this is `make` in `10.03_app_demo/2_src`, whose top-level `Makefile` just dispatches
-to `makefile_u` or `makefile_q` based on `QUNIBONE_PLATFORM`. That makefile in turn builds the PRU0
-and PRU1 firmware images (as linkable C arrays dropped into `10.01_base/4_deploy_u|q/`) and then
-compiles/links the `demo` ARM binary, pulling in the device sources listed as `$(OBJECTS)`.
+to `makefile_u` or `makefile_q` based on `QUNIBONE_PLATFORM`. Those two are thin wrappers that set
+the per-bus deltas (`PLATFORM_SUFFIX`, `PLATFORM_CCDEFS`, the PRU1 firmware name, any bus-only
+device objects such as m9312/ke11 on UNIBUS) and include `makefile.common`, which holds the shared
+`$(OBJECTS)` list and all build rules. That in turn builds the PRU0 and PRU1 firmware images (as
+linkable C arrays dropped into `10.01_base/4_deploy_u|q/`) and then compiles/links the `demo` ARM
+binary, pulling in the device sources listed as `$(OBJECTS)`.
 
 Run the resulting binary:
 ```bash
@@ -189,9 +192,10 @@ platforms and use both build paths. `crossco` doesn't touch the `_u`/`_q` symlin
 
 ### Adding a device source file
 
-Adding a new device source file requires adding its `.o` to `$(OBJECTS)` in **both**
-`makefile_u` and `makefile_q` (unless the file itself is bus-specific and only belongs in one). This
-applies whichever way you build.
+Adding a new device source file means adding its `.o` to `$(OBJECTS)` and a build rule in
+`makefile.common` — one place, both buses. Only if the device exists on one bus alone does it go
+into that bus's `makefile_u`/`makefile_q` instead (`PLATFORM_OBJECTS` plus a rule after the
+`include`, like m9312/ke11 in `makefile_u`). This applies whichever way you build.
 
 ## CPU emulation core tests (`10.05_cputest`)
 

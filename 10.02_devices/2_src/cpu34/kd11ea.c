@@ -489,9 +489,6 @@ step(KD11EA *cpu)
 	int32_t prod;
 	word sh;
 
-//	printf("fetch from %06o\n", cpu->r[7]);
-//	printstate(cpu);
-
 #define SP	cpu->r[6]
 #define PC	cpu->r[7]
 #define SR	cpu->r[010]
@@ -545,8 +542,6 @@ step(KD11EA *cpu)
 #define INA(a,d)	cpu->ba = a; if(dati(cpu, 0)) goto be; d = cpu->bus->data
 #define TR(m)	if (unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"\n", PC-2)
 #define TRB(m)	if (unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"%s\n", PC-2, by ? "B" : "")
-//#define TR(m)	trace("EXEC [%06o] "#m"\n", PC-2)
-//#define TRB(m)	trace("EXEC [%06o] "#m"%s\n", PC-2, by ? "B" : "")
 
 	inhov = 0;
 
@@ -558,19 +553,10 @@ step(KD11EA *cpu)
 		cpu->external_intr = 0 ;
 		pthread_mutex_unlock(&cpu->mutex) ;
 		if (external_intr){
-			//ARM_DEBUG_PIN1(0);	// INTR processed
 			cpu->state = KD11EA_STATE_RUNNING ;
 			TRAP(external_intrvec);
-		}	
+		}
 	}
-
-//	if(cpu->r[7] == 016440) {
-//	 	cpu->state = KD11EA_STATE_HALTED;
-//	 	printf("\nUB BREAKPOINT\n");
-//	 	printf("R0 %06o R1 %06o R2 %06o R3 %06o R4 %06o R5 %06o R6 %06o R7 %06o\n", cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3], cpu->r[4], cpu->r[5], cpu->r[6], cpu->r[7]);
-//	 	printf("ba %06o ir %06o psw %06o\n", cpu->ba, cpu->ir, cpu->psw);
-//	 	return;
-//	}
 
 	oldpsw = PSW;
 	// MMR2 latches the address of this instruction, MMR1 starts empty.
@@ -605,8 +591,6 @@ step(KD11EA *cpu)
 	case 0120000: case 0020000:	TRB(CMP);
 		RD_B; CLCV;
 		b = SR + W(~DR) + 1; NC; BXT;
-//		if(cpu->ir == 021527)
-//			printf("cmp (r5),xx -> %o vs %o\n", SR, DR);
 		if(sgn((SR ^ DR) & ~(DR ^ b))) SEV;
 		NZ; SVC;
 	case 0130000: case 0030000:	TRB(BIT);
@@ -1209,8 +1193,6 @@ kd11ea_setintr(KD11EA *cpu, unsigned vec)
 	cpu->external_intr = true;
 	cpu->external_intrvec = vec;
 	trace("INTR vec=%03o\n", vec) ;
-//	if (cpu->state == KD11EA_STATE_WAITING) // atomically
-//		cpu->state = KD11EA_STATE_RUNNING ;
 	pthread_mutex_unlock(&cpu->mutex) ;
 }
 

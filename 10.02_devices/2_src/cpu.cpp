@@ -51,9 +51,6 @@
  */
 #undef CPU_CONTROLLED_TIME
 
-int dbg = 0;
-
-
 
 /*** functions to be used by the emulation cores ***/
 
@@ -70,8 +67,6 @@ void unibone_log(unsigned msglevel, const char *srcfilename, unsigned srcline, c
 {
     va_list arg_ptr;
     va_start(arg_ptr, fmt);
-    //vprintf(fmt, arg_ptr) ;
-    //va_end(arg_ptr); va_start(arg_ptr, fmt);
     logger->vlog(unibone_cpu, msglevel, /*late_evaluation*/true, srcfilename, srcline, fmt, arg_ptr);
     va_end(arg_ptr);
 }
@@ -131,12 +126,9 @@ int unibone_dato(unsigned addr, unsigned data)
         ddrmem->pmi_deposit(addr, data);
         success = true;
     } else {
-        dbg = 1;
         qunibusadapter->cpu_DATA_transfer(unibone_cpu->data_transfer_request,
                                           QUNIBUS_CYCLE_DATO, addr, &wordbuffer);
-        dbg = 0;
         success = unibone_cpu->data_transfer_request.success;
-        //printf("DATO; ba=%o, data=%o, success=%u\n", addr, data, (int)success) ;
     }
 
     // trace bus access
@@ -166,13 +158,10 @@ int unibone_datob(unsigned addr, unsigned data)
         success = true;
     } else {
         // TODO DATOB als 1 byte-DMA !
-        dbg = 1;
         uint16_t w = (uint16_t) data;
         qunibusadapter->cpu_DATA_transfer(unibone_cpu->data_transfer_request,
                                           QUNIBUS_CYCLE_DATOB, addr, &w);
-        dbg = 0;
         success = unibone_cpu->data_transfer_request.success;
-        //printf("DATOB; ba=%o, data=%o, success=%u\n", addr, data, (int)success) ;
     }
 
     // trace bus access
@@ -200,13 +189,10 @@ int unibone_dati(unsigned addr, unsigned *data)
         *data = w;
         success = true;
     } else {
-        dbg = 1;
         qunibusadapter->cpu_DATA_transfer(unibone_cpu->data_transfer_request,
                                           QUNIBUS_CYCLE_DATI, addr, &w);
         *data = w;
-        dbg = 0;
         success = unibone_cpu->data_transfer_request.success;
-        //printf("DATI; ba=%o, data=%o, success=%u\n", addr, *data, (int)success) ;
     }
 
     // trace bus access
@@ -326,28 +312,11 @@ bool cpu_base_c::on_param_changed(parameter_c *param)
 // start CPU logic on PRU and switch arbitration mode
 void cpu_base_c::start()
 {
-// stop on an ZRXB test before error output starts, to watch CPU trace
+    // For debugging, trigger conditions and tracer address ranges can be set
+    // here before the CPU starts, see qunibus_tracer.hpp:
+    //	trigger.condition_add(trigger_condition_c(0777170, TRIGGER_DATO)) ;
+    //	tracer.enable(026276, 026400) ;
     trigger.conditions_clear() ;
-    /* Earlier use cases left as example: *
-    trigger.condition_add(trigger_condition_c(0777170, TRIGGER_DATO)) ; // ZRXF, start test by write into RXCS
-    trigger.condition_add(trigger_condition_c(0003576, TRIGGER_DATI)) ; // ZRXA, SEEKER
-
-    cycle_trace_buffer.active = true ;
-
-// now: trace on
-//trigger.condition_add(trigger_condition_c(0034500, TRIGGER_DATI)) ; // ZRXF, test 36 end
-//trigger.condition_add(trigger_condition_c(0010560, TRIGGER_DATI)) ; // for mov wc,rxdb
-//trigger.print(stdout) ;
-*/
-#ifdef ENABLE_TRIGGERS
-    	// code flow tracing: only trace EXEC in this range, when trace_exec_addr_from > 0
-    //	tracer.enable(0177170,0177173) ; // RX01/02
-    	tracer.enable(026276,026400) ; // ZRXF main level of test 17
-    	tracer.enable(034246,034500) ; // ZRXF main level of test 36
-    	tracer.enable(010626,010742) ; // ZRXF EMPBUF subr
-    	tracer.enable(011610,011632) ; // ZRXF WAIT
-    //	tracer.enable(012032,012106) ; // ZRXF AWDN wait for done
-#endif
 
     runmode.value = true;
     mailbox->param = 1;
@@ -383,13 +352,11 @@ void cpu_base_c::stop(const char * info, int show_options)
     qunibus->set_arbitrator_active(false);
 
     if (info && strlen(info)) {
-        if (show_options & show_pc) {
-            char buff[256];
-            strcpy(buff, info);
-            strcat(buff, " at %06o");
-            INFO(buff, core_get_pc());
-        } else
-            INFO(info);
+        // "info" is caller text: always an argument, never a format string
+        if (show_options & show_pc)
+            INFO("%s at %06o", info, core_get_pc());
+        else
+            INFO("%s", info);
     }
 	if (show_options & show_trigger) {
 		trigger.print(stdout) ;
@@ -410,26 +377,16 @@ void cpu_base_c::worker(unsigned instance)
 {
     UNUSED(instance); // only one
     timeout_c timeout;
-// bool nxm;
-// unsigned pc = 0;
-//unsigned dr = 0760102;
-    unsigned opcode = 0;
-    (void) opcode;
 
     power_event_ACLO_active = power_event_ACLO_inactive = power_event_DCLO_active = false;
 
 // run with lowest priority, but without wait()
 // => get all remaining CPU power
     worker_init_realtime_priority(none_rt);
-//worker_init_realtime_priority(device_rt);
 
     timeout.wait_us(1);
 
     while (!workers_terminate) {
-        // speed control is difficult, force to use more ARM cycles
-//			if (runmode.value != (core_get_state() != 0))
-//				core_set_state(runmode.value);
-
         // RUN led
         runmode.value = (core_get_state() > 0); // RUNNING, WAITING
         if (runmode.value)
@@ -447,7 +404,6 @@ void cpu_base_c::worker(unsigned instance)
         if (!runmode.value && start_switch.value) {
             // START, or HALT+START: reset system
             core_set_pc(pc.value & 0xffff);
-//            core_set_switches(swreg.value & 0xffff);
             qunibus->init();
             core_reset();
             if (!halt_switch.value) {
@@ -458,9 +414,7 @@ void cpu_base_c::worker(unsigned instance)
         start_switch.value = false; // momentary action
 
         enum cpu_state_e prev_core_state = core_get_state();
-        // ARM_DEBUG_PIN(0,1) ; // measure pmi gain
         core_condstep();
-        // ARM_DEBUG_PIN(0,0) ;
         if (core_get_state() != cpu_state_halted && trigger.has_triggered()) {
             stop("Halted by trigger conditions:", show_pc+show_trigger+show_state+show_cycletrace);
         } else  if (breakpoint.value && core_get_state() != cpu_state_halted && breakpoint.value == core_get_pc()) {
@@ -481,7 +435,6 @@ void cpu_base_c::worker(unsigned instance)
         // serialize asynchronous power events
         // ACLO inactive & no HALT: reboot
         // ACLO inactive & HALT: boot on CONT
-//if (power_event)	DEBUG_FAST("power_event=%d", power_event) ;
         // ACLO: power fail trap, if running.
         if (runmode.value && power_event_ACLO_active) {
             core_pwrfail_trap();
@@ -491,13 +444,10 @@ void cpu_base_c::worker(unsigned instance)
         // DCLO: halt, like "enable = 0"
         if (runmode.value && power_event_DCLO_active) {
             stop("CPU HALT by DCLO", show_pc);
-//			core_reset();
         }
         power_event_DCLO_active = false; // processed
         if (power_event_ACLO_inactive) {
             // Reboot
-            // if HALT switch active: no action, event remains pending
-//			if (!halt_switch.value) {
             stop("ACLO", show_pc);
             // execute this with real-world time, else lock (CPU not step() ing here)
             qunibus->init();		// reset devices
@@ -506,7 +456,6 @@ void cpu_base_c::worker(unsigned instance)
             core_reset();
             core_pwrup_vector_fetch();
             // M9312 logic here: vectror redirection for 300ms
-//			}
             power_event_ACLO_inactive = false;		// processed
         }
 
