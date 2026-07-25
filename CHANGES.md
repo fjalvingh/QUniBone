@@ -2,258 +2,26 @@
 
 Notable changes to QUniBone, newest first.
 
-## Unreleased
-
-### FKABD1 passes: three KD11-EA trap defects, and a KL11 that takes time to print
-
-`FKABD1`, the 11/34 trap test, ended in a double bus error after 3480 instructions. Fixing that
-uncovered the next defect each time, and once the CPU was right the tape ran on into two things the
-fake bus of the test harness got wrong about the console — its interrupt request was a level rather
-than a flip-flop, and its transmitter was infinitely fast. The tape now passes; `FKTFA0` gets
-332 instructions in instead of 150, and still fails, on the same class of defect in `RTI`.
-
-**Changed — the CPU core**
-
-- `10.02_devices/2_src/cpu34/kd11ea.c`, `kd11ea.h` — the trap sequence now ends at an instruction
-  boundary and arbitrates again before the handler's first instruction, which is what makes the
-  kernel stack limit trap land in time; an autoincrement is undone when the reference it addressed
-  is aborted by a bus timeout or the MMU, and committed when that cycle completes; `MOV` no longer
-  drops a failed destination write. The debug `printf()` for an unimplemented 0700xx instruction is
-  a `trace()`. Full diagnosis in `10.02_devices/2_src/cpu34/CHANGES.md`.
-- `10.02_devices/2_src/cpu20/ka11.c` — **unchanged**. The 11/20 core returns from its trap sequence
-  the same way and has the same `// TODO: is this correct?`, but no tape in the suite decides it
-  there, and the 13 `ZKA*` diagnostics pass on both cores as they are.
-
-**Changed — the test harness**
-
-- `10.05_cputest/2_src/testbus.cpp`, `testbus.hpp` — the KL11 stub models a DEC controller's
-  interrupt request as the flip-flop it is: set by the leading edge of (READY AND INTERRUPT ENABLE),
-  cleared by the grant or by clearing the enable, so writing the enable bit again when it is already
-  set asks for nothing. And a character now takes 8 instructions to go out, with READY down while it
-  does: `FKABD1` writes one, enables the interrupt while the transmitter is still busy and executes
-  a `WAIT`, and expects the interrupt to end the `WAIT`.
-- `10.05_cputest/3_tapes/cpu34/FKABD1.BIC.opt` — new, `pass-text = DONE`: the tape announces the end
-  of a pass in words, like `FKAAC0` and `FKACA0`.
-- `10.05_cputest/3_tapes/README.md` — `FKABD1` moved to the passing set, its failure section
-  dropped, `FKTFA0` re-diagnosed and the `FKTHB0` error table refreshed.
-
-**Verified**: on the host, `10.05_cputest`, 36 runs: 32 pass (the 26 PDP-11/20 runs, `FKAAC0`,
-`FKABD1`, `FKACA0`, `FKTBA0`, `FKTCA0`, `FKTDA1`), `FKTGC0` is skipped, and 3 still fail —
-`FKTAA0`, `FKTFA0`, `FKTHB0`. The ARM `demo` cross-compiles and links. No hardware run: `cpu.cpp`
-and the PRUs are untouched.
-
-### FKAAC0 and FKACA0 pass: five KD11-EA defects, and a text pass criterion
-
-`FKAAC0`, the 11/34 basic instruction test, halted after 2206 instructions on the defect the tape
-README named — a register source read *after* the destination had autoincremented it. Fixing that
-uncovered the next defect each time, five in a row, and the tape then ran clean but could still not
-be judged: like `FKACA0` it announces the end of a pass in text, not with a BEL, so the runner rang
-up the instruction limit. Both tapes now pass.
-
-**Changed — the CPU core**
-
-- `10.02_devices/2_src/cpu34/kd11ea.c` — operand evaluation order (source strictly before
-  destination, in `RD_B`/`RD_U`); `JMP`/`JSR` in autoincrement mode jump to the effective address
-  instead of the incremented register; `SXT` and `MARK` implemented, both of which trapped as
-  reserved instructions; the T bit is no longer settable by `MTPS` or by a bus write to 777776, only
-  by `RTI`/`RTT`. Full diagnosis in `10.02_devices/2_src/cpu34/CHANGES.md`.
-- `10.02_devices/2_src/cpu20/ka11.c` — **unchanged**, deliberately. The 11/20 core reads the same
-  way but is a different machine: whether a register source sees the destination's autoincrement or
-  autodecrement is a documented family difference (*PDP-11 Architecture Handbook* 1983, appendix B —
-  the 15/20 modifies the register first, the 34 does not), the KA11 has neither `SXT` nor `MARK`,
-  and its `JMP`/`JSR` use the incremented register on purpose.
-
-**Changed — the test harness**
-
-- `10.05_cputest/2_src/cputest.cpp`, `testbus.cpp`, `testbus.hpp` — new `pass-text` option
-  (`--pass-text` / `.opt` sidecar key): a run passes when the KL11 has printed that string, for a
-  tape which announces the end of a pass in words instead of with a BEL. Sidecar values now run to
-  the end of the line, so they may contain blanks.
-- `10.05_cputest/3_tapes/cpu34/FKAAC0.BIC.opt`, `FKACA0.BIC.opt` — new, both `pass-text = END PASS`.
-- `10.05_cputest/3_tapes/README.md` — both tapes moved to the passing set, their failure sections
-  dropped, `pass-text` documented.
-
-**Verified**: on the host, `10.05_cputest`, 36 runs: 31 pass (the 26 PDP-11/20 runs, `FKAAC0`,
-`FKACA0`, `FKTBA0`, `FKTCA0`, `FKTDA1`), `FKTGC0` is skipped, and 4 still fail — `FKABD1`,
-`FKTAA0`, `FKTFA0`, `FKTHB0`, unchanged except that `FKTHB0` now reaches the instruction limit at a
-different PC. The ARM `demo` cross-compiles and links. No hardware run: `cpu.cpp` and the PRUs are
-untouched.
-
-### MFPS with a register destination no longer aborts the emulator
-
-`FKTHB0` killed the process outright — `Assertion '0' failed` in `addrop()` of `kd11ea.c`, no `FAIL`
-line at all, and on a BeagleBone the same path would abort `demo`. The instruction is `MFPS R1` at
-020566, the read-back half of the diagnostic's MTPS/MFPS walk of the priority field. `addrop()`
-computes an address, so it starts at mode 1 and asserts on mode 0; every other direct caller guards
-that (`MFPI`/`MTPI` branch to a register-mode path, `JSR`/`JMP` do `goto ill`, the `RD_U` macro is
-itself `if(dm != 0) …`) and the MFPS case was the one written without a guard. `MFPS Rn` is a legal
-KD11-EA instruction, not something that should trap.
-
-**Changed**
-
-- `10.02_devices/2_src/cpu34/kd11ea.c` — the MFPS case of `step()`. `addrop()` is now called only
-  for `dm != 0`, and three further bugs on the same lines are fixed with it: the destination was
-  written as a word (`by = 0`), where MFPS writes one byte to memory and sign extends PS<7> through
-  the whole word into a register, like MOVB; `addrop()` was passed byte flag 0, so `(R0)+`/`-(R0)`
-  stepped by 2 instead of 1; and no condition codes were set at all, where MFPS sets N from PS<7>
-  and Z from the byte, clears V and leaves C.
-- `10.05_cputest/3_tapes/README.md` — FKTHB0 moved from "aborts the emulator" into the ordinary
-  failing set, with the diagnosis above; the recorded FKTFA0 halt address corrected to 001660.
-
-**Verified**: on the host, `10.05_cputest`, 36 runs. FKTHB0 no longer aborts; it gets some 9000
-times further, into the KT11-D abort test at 030034…030120, and now fails on the instruction limit
-instead — an endless loop, not a slow tape: 6 G instructions do not finish it either. Every other
-tape is bit-for-bit unchanged against a binary built from the unmodified core —
-the 26 PDP-11/20 runs and `FKTBA0`/`FKTCA0`/`FKTDA1` still pass, and `FKAAC0`, `FKABD1`, `FKACA0`,
-`FKTAA0`, `FKTFA0` fail at the same PC after the same instruction count as before. No hardware run:
-`cpu.cpp` and the PRUs are untouched.
-
-### FKTGC0 ignored in the CPU test suite
-
-`FKTGC0` exercises the KL11 console itself, far beyond what the minimal KL11 stub of the fake bus
-provides, so its result says nothing about the CPU core under test. Rather than leave it red among
-the genuine KD11-EA failures, it is skipped.
-
-**Changed**
-
-- `10.05_cputest/2_src/cputest.cpp` — new `ignore` option (`--ignore` / `.opt` sidecar key): the
-  runner prints a `SKIP` line and exits 0 without running the tape. This is only for tapes that are
-  out of scope for the harness; the deliberate no-expected-failure policy for real core defects
-  stands.
-- `10.05_cputest/3_tapes/cpu34/FKTGC0.BIC.opt` — sets `ignore = 1`, keeping `bell-is-pass = 0` for
-  when the tape is re-enabled.
-- `10.05_cputest/3_tapes/README.md` — FKTGC0 moved from the failing set (now 6 of 10 XXDP 11/34
-  diagnostics) to its own "ignored" section; `ignore` documented among the sidecar keys.
-
-**Verified**: on the host, `cputest --core cpu34 --tape .../FKTGC0.BIC` reports
-`SKIP cpu34 FKTGC0.BIC (ignored, see FKTGC0.BIC.opt)` with exit 0, and the make stamp rule for the
-pair does the same. No hardware involved.
-
-### Device interrupts in the CPU test suite
-
-The fake bus the cores are tested against had no interrupts at all:
-`unibone_grant_interrupts()` was empty and `unibone_prioritylevelchange()` threw its argument away,
-so a diagnostic which arms a device interrupt and waits for it could only time out. `FKTDA1` and
-`FKTGC0` do exactly that with the KL11.
-
-**Changed**
-
-- `10.05_cputest/2_src/testbus.cpp`, `testbus.hpp` — `testbus_c` now does the job the PRU arbitrator
-  does on a real QUniBone, minus the threads, which is what keeps a run repeatable. Each KL11 half
-  has an interrupt request flipflop, set when its ready/done flag comes up with the interrupt enable
-  on (or when the enable is turned on while the flag is already up) and cleared by the GRANT, by
-  clearing the enable and by INIT. `unibone_prioritylevelchange()` keeps PSW<7:5>, and
-  `unibone_grant_interrupts()` — called by the core before every opcode fetch and while it sits in a
-  WAIT — grants a request if the CPU is below BR4 and delivers vector 060 (receive) or 064
-  (transmit).
-- `10.05_cputest/2_src/testcore.hpp`, `testcore_cpu20.cpp`, `testcore_cpu34.cpp` — new
-  `testcore_c::setintr()` over `ka11_setintr()`/`kd11ea_setintr()`, the same core entry
-  `cpu_base_c::on_interrupt()` uses on hardware. `testbus_c::install()` takes the core to deliver to.
-- `10.05_cputest/2_src/cputest.cpp`, `testbus.hpp`, `3_tapes/cpu34/FKTGC0.BIC.opt` — new
-  `bell-is-pass` option, settable per tape. The suite judges a run passed when the diagnostic prints
-  a BEL, which is how a MAINDEC signals "end of pass". `FKTGC0` exercises the KL11 as a device and
-  sends the whole character set as test data, BEL included, so with interrupts working it was
-  reported as passed after 634 instructions — on the seventh character it prints. Its sidecar turns
-  the rule off; the tape is judged failing until someone works out how a correct run ends.
-
-**Verified**: `10.05_cputest` on the host, 36 runs, 29 passing. `FKTDA1` **passes** (63805
-instructions). `FKTGC0` gets from a halt in the vector area after 250 k instructions to 13 complete
-character set sweeps and a halt at 003300, and is reported as failing, not falsely passing. All 26
-PDP-11/20 runs still pass. No hardware run: `cpu.cpp` and the PRUs are untouched.
-
-### HALT and RESET are kernel-only on the KD11-EA
-
-The 11/34 core executed both of its privileged instructions in any processor mode: a user-mode HALT
-stopped the machine and a user-mode RESET pulsed bus INIT. On real hardware neither can happen — a
-user program must not be able to stop the processor or initialize the bus. `FKTDA1` tests exactly
-this and died on it after 58 instructions.
-
-**Changed**
-
-- `10.02_devices/2_src/cpu34/kd11ea.c` — HALT outside kernel mode is a reserved instruction and
-  traps through vector 10 (`goto ri`) instead of halting; RESET outside kernel mode is a no-op, so
-  `kd11ea_reset()`/`unibone_bus_init()` only run in kernel mode. The KA11 is untouched: an 11/20 has
-  no processor modes.
-- `10.05_cputest/2_src/testbus.cpp`, `testbus.hpp` — `unibone_bus_init()` was empty, so a RESET in
-  the test harness never reached the register stubs and the KL11 kept its interrupt enable across
-  INIT, which `FKTDA1` also checks. It now calls the new `testbus_c::bus_init()`, which puts the
-  KL11 registers back into their power-up state.
-
-**Verified**: `10.05_cputest` on the host. `FKTDA1` runs to instruction 103 instead of 58 and now
-stops on a missing harness feature — the fake bus grants no device interrupts, so the KL11
-transmitter interrupt the diagnostic arms never arrives (documented in
-`10.05_cputest/3_tapes/README.md`). No change to the pass/fail set: 28 of 36 runs pass, all 26
-PDP-11/20 runs among them. No hardware run.
-
-### The KD11-EA answers for the PSW at 777776
-
-The 11/34 core did not implement the processor status word at its bus address: `kd11ea.c` `dati()`
-and `dato()` answered `case 0777776: case 0777777:` with a bus timeout. That was inherited from the
-11/20 KA11 and is wrong for the KD11-EA, which has MFPS/MTPS *as well as* the PSW address, not
-instead of it — and 777776 is the only way to reach the mode and priority bits. Six of the ten XXDP
-diagnostics added below died on their first access to it, after as few as 3 instructions.
-
-**Changed**
-
-- `10.02_devices/2_src/cpu34/kd11ea.c` — `dati()` returns `cpu->psw` for 777776/777777 (a byte read
-  of the odd address gets PSW<15:8>, the caller shifting the half down as it does for any register).
-  `dato()` routes the write through `kd11ea_set_psw()`, so a changed mode switches the stack pointer
-  and the KT11-D address space and a changed PSW<7:5> reaches the arbitrator; a DATOB writes only
-  the addressed half, using the same `mask` as the KT11-D registers.
-- `10.02_devices/2_src/cpu34/kd11ea.c` — new `PSW_MASK` (0170377) is applied inside
-  `kd11ea_set_psw()` rather than at the bus, so the bits an 11/34 has no flipflop for — PSW<11>,
-  there being one register set only, and the unused <10:8> — can never be loaded from any source:
-  777776, MTPS, RTI/RTT or a trap vector. The T bit stays writable from 777776, as on the KA11.
-
-The PSW is still not published as a QUNIBUS register of `cpu34_c`, so it remains visible to the
-emulated CPU only, exactly like the KT11-D registers and like `cpu20_c`.
-
-**Verified**: `10.05_cputest` on the host, 36 runs. `FKTBA0` and `FKTCA0` now **pass**; the other
-four PSW victims get past it (`FKTAA0` runs 4.5 M instructions instead of 227) and fail later on
-unrelated defects. All 26 PDP-11/20 runs still pass, so the mask change disturbs nothing. The build
-stays red on the remaining eight 11/34 tapes — see `10.05_cputest/3_tapes/README.md`, whose failure
-list is updated. No hardware run.
+### The CPU test suite: work in progress
 
 ### XXDP diagnostics for the 11/34 in the CPU test suite
+
+While fixing the 11/34 core we use XXDP tests in 10.05_cputest/3_tapes/cpu34. 
+
+Which tape fails on what is tracked in `10.05_cputest/3_tapes/README.md`, and the core defects
+found and fixed since are recorded in `10.02_devices/2_src/cpu34/CHANGES.md` — not here.
 
 Ten XXDP diagnostics for the PDP-11/34 were added to `10.05_cputest/3_tapes/cpu34/`: the instruction
 tests `FKAAC0`, `FKABD1`, `FKACA0` and the KT11-D memory management tests `FKTAA0`, `FKTBA0`,
 `FKTCA0`, `FKTDA1`, `FKTFA0`, `FKTGC0`, `FKTHB0`. These close the coverage gap left by the ZKA\* set,
 which predates the 11/34 and exercises nothing of EIS, MFPS/MTPS or the MMU.
 
-They did not run as added, for two reasons in the harness, both now fixed:
-
-**Changed**
-
-- `10.05_cputest/2_src/makefile` — tape discovery matched `*.BIN` only, so the `.BIC` files of an
-  XXDP distribution were silently skipped and the suite reported success without running any of
-  them. Both extensions are matched now, through a `TAPE_EXTENSIONS` list.
-- `10.05_cputest/2_src/papertape.cpp`, `testbus.cpp`, `testbus.hpp` — the loader read a block two
-  bytes at a time and rejected an odd data byte count as a "paper tape botch", a limitation
-  inherited from upstream's `loadpt()`. Four of the ten tapes use odd-length blocks. It now loads
-  byte by byte; `testbus_c::mem_deposit()` became `mem_deposit_byte()`.
-
 **Status: the build is red, deliberately**
 
-All 26 PDP-11/20 runs still pass. All ten 11/34 tapes fail, on defects in the KD11-EA core which is
-exactly what they were added to find. No expected-failure mechanism was added — the failures are
+All 26 PDP-11/20 runs still pass. 11/34 tests still fail, and we are fixing these one by one.
+
+No expected-failure mechanism was added — the failures are
 meant to stay visible. `SKIP_CPUTESTS=1` or `./crossco -n` builds without them.
-
-The causes, diagnosed from the runner's failure traces and recorded in full in
-`10.05_cputest/3_tapes/README.md`:
-
-- **The PSW is not accessible at 777776** — six tapes die after 3 to 227 instructions on their first
-  access to it. `kd11ea.c` `dati()`/`dato()` answer `case 0777776: case 0777777:` with a bus
-  timeout, so nothing implements the address, and the still-zero vector 4 turns the trap into a
-  halt. Inherited from the 11/20 KA11, where the odd byte of the PSW address had already been made
-  a bus error; it matters far more on the 11/34. *Fixed since, see the entry above.*
-- **`assert(0)` in `addrop()`** (`kd11ea.c:318`, addressing mode 0) — `FKTHB0` aborts the process
-  instead of failing, so it produces no result line at all. A register-mode operand where an address
-  is required is an illegal instruction and should trap through vector 4; on the BeagleBone this
-  same path would abort `demo`.
-- **Not yet diagnosed** — `FKAAC0` halts at 026432 with R1 = 177777, its own error report path, so a
-  genuine instruction-test failure. `FKACA0` and `FKTGC0` spin in a short shift/compare loop until
-  the instruction limit, and stay stuck with the PSW patch applied, so they have a separate cause.
 
 **Verified**: cross-compile only, no hardware run. 26 of 36 runs pass; the ten failures above are
 reproduced from a clean build. Confirmed the byte-wise loader rewrite did not disturb the 11/20

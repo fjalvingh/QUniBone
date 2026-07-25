@@ -1,7 +1,9 @@
 # Changes to the KD11-EA core (PDP-11/34)
 
-Change log of this directory only, newest first. The repo-wide log is `CHANGES.md` in the root;
-entries here are the detailed version of whatever that file says about `cpu34/`.
+Change log of this directory only, newest first. **Every change to these files is recorded here,
+and defect fixes are recorded here only** — the repo-wide `CHANGES.md` in the root carries an entry
+only when the core gains or loses functionality at feature level (a new CPU model, the MMU, an
+FPU), never one per diagnostic made to pass.
 
 Files: `kd11ea.c`/`kd11ea.h` (the CPU core), `kt11d.c`/`kt11d.h` (the memory management unit),
 `11.h` (basic types, private to this directory). The ARM-side wrapper is `../cpu34.cpp`/`.hpp`, the
@@ -83,6 +85,56 @@ behaviour. And its PSW is written straight through in `ka11.c` `dato()`, with no
 against. The 13 `ZKA*` tapes decide none of it: they pass on both cores, and none of them ever
 executes a double operand instruction with a register source and the same register as an
 autoincrement/autodecrement destination (checked by instrumenting `step()` for all 13 runs).
+
+### MFPS with a register destination no longer aborts the emulator
+
+`FKTHB0` killed the process outright — `Assertion '0' failed` in `addrop()`, no failure line at all,
+and on a BeagleBone the same path would abort `demo`. The instruction is `MFPS R1` at 020566, the
+read-back half of the diagnostic's MTPS/MFPS walk of the priority field. `addrop()` computes an
+address, so it starts at mode 1 and asserts on mode 0; every other direct caller guards that
+(`MFPI`/`MTPI` branch to a register-mode path, `JSR`/`JMP` do `goto ill`, the `RD_U` macro is itself
+`if(dm != 0) …`) and the MFPS case was the one written without a guard. `MFPS Rn` is a legal
+KD11-EA instruction, not something that should trap.
+
+`addrop()` is now called only for `dm != 0`, and three further defects on the same lines went with
+it:
+
+- The destination was written as a word (`by = 0`). MFPS writes one byte to memory, and sign extends
+  PS<7> through the whole word into a register, like MOVB.
+- `addrop()` was passed byte flag 0, so `(R0)+`/`-(R0)` stepped by 2 instead of 1.
+- No condition codes were set at all. MFPS sets N from PS<7> and Z from the byte, clears V and
+  leaves C.
+
+### HALT and RESET are kernel-only
+
+Both privileged instructions executed in any processor mode: a user-mode HALT stopped the machine
+and a user-mode RESET pulsed bus INIT. On real hardware neither can happen — a user program must not
+be able to stop the processor or initialize the bus. `FKTDA1` tests exactly this and died on it
+after 58 instructions.
+
+HALT outside kernel mode is a reserved instruction and traps through vector 10 (`goto ri`) instead
+of halting; RESET outside kernel mode is a no-op, so `kd11ea_reset()`/`unibone_bus_init()` only run
+in kernel mode. Not carried over to `cpu20/ka11.c`: an 11/20 has no processor modes.
+
+### The PSW is addressable at 777776 again
+
+Removing it with the KT11-D work below was wrong. `dati()`/`dato()` answered
+`case 0777776: case 0777777:` with a bus timeout, which is inherited KA11 behaviour; the KD11-EA has
+MFPS/MTPS *as well as* the PSW address, not instead of it, and 777776 is the only way to reach the
+mode and priority bits. Six of the ten XXDP diagnostics died on their first access to it, after as
+few as 3 instructions.
+
+- `dati()` returns `cpu->psw` for 777776/777777. A byte read of the odd address gets PSW<15:8>, the
+  caller shifting the half down as it does for any register.
+- `dato()` routes the write through `kd11ea_set_psw()`, so a changed mode switches the stack pointer
+  and the KT11-D address space and a changed PSW<7:5> reaches the arbitrator. A DATOB writes only
+  the addressed half, using the same `mask` as the KT11-D registers.
+- New `PSW_MASK` (0170377) is applied inside `kd11ea_set_psw()` rather than at the bus, so the bits
+  an 11/34 has no flipflop for — PSW<11>, there being one register set only, and the unused <10:8> —
+  can never be loaded from any source: 777776, MTPS, RTI/RTT or a trap vector.
+
+The PSW is still not published as a QUNIBUS register of `cpu34_c`, so it remains visible to the
+emulated CPU only, exactly like the KT11-D registers and like `cpu20_c`.
 
 ### KT11-D memory management
 
@@ -186,5 +238,4 @@ At that point the fork still executed the 11/20 instruction set, without memory 
 
 ## Known gaps
 
-- MARK (word form 006400) still takes the reserved instruction trap although the 11/34 has it.
 - Console ODT is not emulated.

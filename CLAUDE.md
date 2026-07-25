@@ -266,6 +266,15 @@ refactors a shared abstraction; small fixes and pure cleanups do not. Follow the
 existing entries: a short "why", then what changed grouped by area with file paths, plus a note on
 how far it was verified (cross-compile only, or tested on real hardware).
 
+**The root log records major changes only, never individual defect fixes.** A directory with its
+own `CHANGES.md` — currently `10.02_devices/2_src/cpu34/` — is where the detail of that component
+goes, and bug fixes in it are recorded *there and only there*. The root gets an entry when the
+component gains or loses functionality at feature level (a new CPU model, the MMU, an FPU, a new
+device) — not when a diagnostic that used to fail now passes, however many core defects that took.
+So the ongoing work of getting the 11/34 core through the XXDP diagnostics belongs in
+`10.02_devices/2_src/cpu34/CHANGES.md`, and the root stays silent about it until something at that
+level changes.
+
 ## Updating an installed system
 
 `update-code.sh` downloads a tagged tarball from GitHub, runs `cleanup.sh` (deletes sources known to
