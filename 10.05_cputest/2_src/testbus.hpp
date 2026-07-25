@@ -130,6 +130,19 @@ private:
     uint16_t kl11_rcsr = 0;
     uint16_t kl11_xcsr = 0200;	// transmitter ready from the start
 
+    /* A character takes time to go out, and READY is down while it does. The
+     character itself is delivered to console_output the moment it is written,
+     but READY comes back only this many instructions later, and that is when
+     the transmitter asks for its interrupt. FKABD1 needs it: it writes a
+     character, enables the interrupt while the transmitter is still busy and
+     executes a WAIT, and expects the interrupt to end the WAIT - so the READY
+     edge has to fall after the two instructions between the write and the
+     WAIT. The exact figure does not matter, a real console is thousands of
+     instructions slow; it is kept small because a diagnostic prints a lot and
+     polls READY in between. */
+    static const unsigned KL11_XMIT_TIME = 8;
+    unsigned kl11_xmit_busy = 0;	// instructions left of the transmission
+
     /*** interrupts ***/
 
     // PSW<7:5> of the CPU, tracked through unibone_prioritylevelchange().

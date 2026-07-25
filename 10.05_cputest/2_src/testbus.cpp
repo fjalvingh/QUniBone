@@ -108,31 +108,52 @@ int testbus_c::io_read(unsigned addr, unsigned *data)
     return 0;	// NXM
 }
 
+/* The interrupt request of a DEC controller is a flip-flop, not a level: it is
+ set by the *leading edge* of (DONE AND INTERRUPT ENABLE) and cleared when the
+ bus grants the interrupt. So writing the enable bit of a CSR which is ready and
+ already enabled asks for nothing - a second interrupt comes only after DONE has
+ been down and up again. Clearing the enable drops a request which was not
+ granted yet. FKABD1 needs both: after its interrupt priority tests it writes
+ XCSR<6> once more, with the vector pointing at a HALT to catch an interrupt
+ which must not happen. */
+static bool int_request(uint16_t was, uint16_t now, bool pending)
+{
+    if (!(now & 0100))
+        return false;
+    if (!(was & 0100) && (now & 0200))
+        return true;
+    return pending;
+}
+
 int testbus_c::io_write(unsigned addr, unsigned data)
 {
     switch (addr) {
-    case KL11_RCSR:
+    case KL11_RCSR: {
         // only the interrupt enable is writable
+        uint16_t was = kl11_rcsr;
         kl11_rcsr = (uint16_t)((kl11_rcsr & ~0100) | (data & 0100));
         // enabling with DONE already up requests an interrupt right away; there
         // is no keyboard here, so DONE never comes up and this never fires
-        kl11_rcv_request = (kl11_rcsr & 0100) && (kl11_rcsr & 0200);
+        kl11_rcv_request = int_request(was, kl11_rcsr, kl11_rcv_request);
         return 1;
+    }
     case KL11_RBUF:
         return 1;	// read only, but answers
-    case KL11_XCSR:
-        kl11_xcsr = (uint16_t)((kl11_xcsr & ~0100) | (data & 0100) | 0200);
-        // the transmitter is always ready, so enabling the interrupt asks for
-        // one immediately - which is what FKTDA1 arms itself with
-        kl11_xmit_request = (kl11_xcsr & 0100) != 0;
+    case KL11_XCSR: {
+        uint16_t was = kl11_xcsr;
+        kl11_xcsr = (uint16_t)((kl11_xcsr & ~0100) | (data & 0100));
+        // enabling the interrupt on an idle transmitter asks for one right
+        // away - which is what FKTDA1 arms itself with. READY is read only:
+        // it is the transmission which puts it up and down
+        kl11_xmit_request = int_request(was, kl11_xcsr, kl11_xmit_request);
         return 1;
+    }
     case KL11_XBUF:
         console_put((uint8_t)(data & 0177));
-        // READY drops for the duration of the transmission and comes back up:
-        // instantaneous here, but the interrupt it asks for is not
-        kl11_xcsr |= 0200;
-        if (kl11_xcsr & 0100)
-            kl11_xmit_request = true;
+        // READY is down for the duration of the transmission; it comes back up
+        // in grant_interrupts(), with the interrupt that goes with it
+        kl11_xcsr &= (uint16_t)~0200;
+        kl11_xmit_busy = KL11_XMIT_TIME;
         return 1;
     case KW11_LKS:
         return 1;
@@ -189,6 +210,7 @@ void testbus_c::bus_init(void)
     // expects the bit to be gone.
     kl11_rcsr = 0;
     kl11_xcsr = 0200;	// transmitter ready again, interrupt enable cleared
+    kl11_xmit_busy = 0;
     kl11_rcv_request = false;
     kl11_xmit_request = false;
 }
@@ -202,6 +224,13 @@ void testbus_c::bus_init(void)
  one level the bus grants by position, receiver before transmitter. */
 void testbus_c::grant_interrupts(void)
 {
+    // this is called once per instruction, and while the CPU sits in a WAIT:
+    // the only clock the transmitter has
+    if (kl11_xmit_busy && --kl11_xmit_busy == 0) {
+        kl11_xcsr |= 0200;	// READY comes back up: the leading edge
+        if (kl11_xcsr & 0100)
+            kl11_xmit_request = true;
+    }
     if (core == nullptr || cpu_priority >= KL11_BR_LEVEL)
         return;
     if (kl11_rcv_request) {

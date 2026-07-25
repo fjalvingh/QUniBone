@@ -4,6 +4,44 @@ Notable changes to QUniBone, newest first.
 
 ## Unreleased
 
+### FKABD1 passes: three KD11-EA trap defects, and a KL11 that takes time to print
+
+`FKABD1`, the 11/34 trap test, ended in a double bus error after 3480 instructions. Fixing that
+uncovered the next defect each time, and once the CPU was right the tape ran on into two things the
+fake bus of the test harness got wrong about the console — its interrupt request was a level rather
+than a flip-flop, and its transmitter was infinitely fast. The tape now passes; `FKTFA0` gets
+332 instructions in instead of 150, and still fails, on the same class of defect in `RTI`.
+
+**Changed — the CPU core**
+
+- `10.02_devices/2_src/cpu34/kd11ea.c`, `kd11ea.h` — the trap sequence now ends at an instruction
+  boundary and arbitrates again before the handler's first instruction, which is what makes the
+  kernel stack limit trap land in time; an autoincrement is undone when the reference it addressed
+  is aborted by a bus timeout or the MMU, and committed when that cycle completes; `MOV` no longer
+  drops a failed destination write. The debug `printf()` for an unimplemented 0700xx instruction is
+  a `trace()`. Full diagnosis in `10.02_devices/2_src/cpu34/CHANGES.md`.
+- `10.02_devices/2_src/cpu20/ka11.c` — **unchanged**. The 11/20 core returns from its trap sequence
+  the same way and has the same `// TODO: is this correct?`, but no tape in the suite decides it
+  there, and the 13 `ZKA*` diagnostics pass on both cores as they are.
+
+**Changed — the test harness**
+
+- `10.05_cputest/2_src/testbus.cpp`, `testbus.hpp` — the KL11 stub models a DEC controller's
+  interrupt request as the flip-flop it is: set by the leading edge of (READY AND INTERRUPT ENABLE),
+  cleared by the grant or by clearing the enable, so writing the enable bit again when it is already
+  set asks for nothing. And a character now takes 8 instructions to go out, with READY down while it
+  does: `FKABD1` writes one, enables the interrupt while the transmitter is still busy and executes
+  a `WAIT`, and expects the interrupt to end the `WAIT`.
+- `10.05_cputest/3_tapes/cpu34/FKABD1.BIC.opt` — new, `pass-text = DONE`: the tape announces the end
+  of a pass in words, like `FKAAC0` and `FKACA0`.
+- `10.05_cputest/3_tapes/README.md` — `FKABD1` moved to the passing set, its failure section
+  dropped, `FKTFA0` re-diagnosed and the `FKTHB0` error table refreshed.
+
+**Verified**: on the host, `10.05_cputest`, 36 runs: 32 pass (the 26 PDP-11/20 runs, `FKAAC0`,
+`FKABD1`, `FKACA0`, `FKTBA0`, `FKTCA0`, `FKTDA1`), `FKTGC0` is skipped, and 3 still fail —
+`FKTAA0`, `FKTFA0`, `FKTHB0`. The ARM `demo` cross-compiles and links. No hardware run: `cpu.cpp`
+and the PRUs are untouched.
+
 ### FKAAC0 and FKACA0 pass: five KD11-EA defects, and a text pass criterion
 
 `FKAAC0`, the 11/34 basic instruction test, halted after 2206 instructions on the defect the tape

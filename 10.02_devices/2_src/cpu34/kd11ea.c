@@ -183,7 +183,40 @@ kd11ea_power_reset(KD11EA *cpu)
 	cpu->stackpointer[KD11EA_SP_KERNEL] = 0;
 	cpu->stackpointer[KD11EA_SP_USER] = 0;
 	cpu->trap_vector = 4;
+	cpu->autoinc_reg = -1;
 	kd11ea_set_psw(cpu, 0);	// kernel mode, priority 0
+}
+
+/* An autoincrement is not committed until the reference it computed the
+ address for has been made: if that bus cycle times out or is aborted by the
+ MMU, the KD11-EA leaves the register at the value it had before the
+ instruction. An autodecrement is not backed out - it is part of forming the
+ address and stands. MAINDEC DFKAB-D relies on both: it reads the first
+ nonexistent address with `TSTB (R0)+`, records R0 in the trap 4 handler, and
+ then expects `TSTB -(R0)` from one above it to abort with R0 left pointing at
+ that same address.
+ MMR1 is not touched here. It records what the instruction did to the
+ registers and freezes on an abort, which is how the hardware presents it. */
+static void
+autoinc_pending(KD11EA *cpu, int r, int amount)
+{
+	cpu->autoinc_reg = r;
+	cpu->autoinc_amount = amount;
+}
+
+static void
+autoinc_commit(KD11EA *cpu)
+{
+	cpu->autoinc_reg = -1;
+}
+
+static void
+autoinc_undo(KD11EA *cpu)
+{
+	if(cpu->autoinc_reg >= 0){
+		cpu->r[cpu->autoinc_reg] -= cpu->autoinc_amount;
+		cpu->autoinc_reg = -1;
+	}
 }
 
 /* The CPU internal registers are decoded on the *physical* address: once
@@ -233,15 +266,18 @@ ok:
 if (unibone_trace_addr(cpu->ba))
  	trace("DATI [%06o] => %06o\n", cpu->ba, cpu->bus->data);
 	cpu->be = 0;
+	autoinc_commit(cpu);
 	return 0;
 be:
 	trace("DATI [%06o]: NXM\n", cpu->ba);
 	cpu->trap_vector = 4;
 	cpu->be++;
+	autoinc_undo(cpu);
 	return 1;
 abort:
 	cpu->trap_vector = KT11D_ABORT_VECTOR;
 	cpu->be++;
+	autoinc_undo(cpu);
 	return 1;
 }
 
@@ -295,14 +331,17 @@ trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bus->data);
 	}
 ok:
 	cpu->be = 0;
+	autoinc_commit(cpu);
 	return 0;
 be:
 	cpu->trap_vector = 4;
 	cpu->be++;
+	autoinc_undo(cpu);
 	return 1;
 abort:
 	cpu->trap_vector = KT11D_ABORT_VECTOR;
 	cpu->be++;
+	autoinc_undo(cpu);
 	return 1;
 }
 
@@ -339,6 +378,8 @@ addrop(KD11EA *cpu, int m, int b)
 		assert(0);
 		return 0;
 	}
+	// a pending autoincrement of an earlier operand has long been committed
+	autoinc_commit(cpu);
 	switch(m&6){
 	case 0:		// REG
 		cpu->b = cpu->ba = cpu->r[r];
@@ -346,6 +387,9 @@ addrop(KD11EA *cpu, int m, int b)
 	case 2:		// INC
 		cpu->ba = cpu->r[r];
 		cpu->b = cpu->r[r] = cpu->r[r] + ai;
+		// the next bus cycle is the one this addresses: it undoes the
+		// increment if it aborts
+		autoinc_pending(cpu, r, ai);
 		// MMR1 records the change, so an abort handler can undo it
 		kt11d_log_register(&cpu->mmu, r, ai);
 		break;
@@ -520,6 +564,9 @@ step(KD11EA *cpu)
 	// MMR2 latches the address of this instruction, MMR1 starts empty.
 	// Both stay frozen while MMR0 holds an abort.
 	kt11d_instruction_start(&cpu->mmu, PC);
+	// whatever the last instruction autoincremented is committed: an abort
+	// of this fetch may not undo it
+	autoinc_commit(cpu);
 	INA(PC, cpu->ir);
 	PC += 2;	/* don't increment on bus error! */
 	by = !!(cpu->ir&B15);
@@ -539,7 +586,9 @@ step(KD11EA *cpu)
 		RD_B; CLV;
 		b = SR; NZ;
 		if(dm==0) cpu->r[df] = SR;
-		else writedest(cpu, SR, by);
+		// a bus timeout or an MMU abort on the destination traps, like
+		// it does for every other instruction which writes memory
+		else if(writedest(cpu, SR, by)) goto be;
 		SVC;
 	case 0120000: case 0020000:	TRB(CMP);
 		RD_B; CLCV;
@@ -579,7 +628,10 @@ step(KD11EA *cpu)
 		reg = (cpu->ir >> 6) & 07;
         switch(cpu->ir & 0177000) {
               default:
-	    		printf("-- ext: %o\n", cpu->ir);
+	    		// no FP11-A here: the whole group is reserved. FKABD1 sweeps
+	    		// it to check that every one of them traps, so this may not
+	    		// print anything.
+	    		trace("-- ext: %o\n", cpu->ir);
                 goto ri;
 
 			case 0070000:		TR(MUL);
@@ -1073,8 +1125,14 @@ trap:
 
 	if (unibone_trace_addr(PC-2))
 	kd11ea_tracestate(cpu);
-	return;		// TODO: is this correct?
-//	SVC;
+	/* The trap sequence ends at an instruction boundary: the processor
+	   arbitrates again here, *before* the first instruction of the handler
+	   runs. That matters for the kernel stack limit, whose violation is
+	   detected by the pushes just made - the resulting trap through vector 4
+	   has to be taken now, not after the handler has had an instruction to
+	   change vector 4 or the stack (MAINDEC DFKAB-D checks for exactly that:
+	   its handler expects SP two words further down on entry). */
+	SVC;
 
 service:
 	c = (PSW >> 5) & 7;	// PSW is 16 bits now, mask the priority out

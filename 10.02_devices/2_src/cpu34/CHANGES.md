@@ -10,6 +10,38 @@ contract to the QUNIBUS adapter is `../cpu_bus_adapter.h`.
 
 ## Unreleased
 
+### Traps: three defects found by FKABD1
+
+`FKABD1`, the 11/34 trap test, lost control after 3480 instructions and ended in a double bus error.
+Three defects in `kd11ea.c`, each uncovered by fixing the one before it; the tape now runs clean
+(319027 instructions per pass).
+
+- **The trap sequence did not end at an instruction boundary.** After pushing PS and PC and loading
+  the vector, `step()` returned instead of arbitrating again, so a trap or interrupt which became
+  pending *during* the trap sequence was only taken after the handler's first instruction. That is
+  wrong for the kernel stack limit above all, since it is the trap sequence's own pushes which
+  violate it: the tape traps into a handler with an illegal `JSR`, expects `SP` two words lower on
+  entry than the trap left it — the stack trap taken in between — and its handler's first
+  instruction repoints vector 4 at a catcher, so one instruction of delay sent the stack trap to the
+  wrong place and walked the stack down through 0 into the I/O page. `trap:` now falls through to
+  `service:`, which is what the `// TODO: is this correct?` there asked about.
+- **An autoincrement stood after the reference it addressed had aborted.** `(R0)+` computes the
+  address from the old register and writes the new one back, but on the KD11-EA that write-back does
+  not survive a bus timeout or an MMU abort of the cycle it addresses. The tape finds the first
+  nonexistent address with `TSTB (R0)+`, records `R0` in its trap 4 handler, and then aborts on the
+  same address with `TSTB -(R0)` from one above it and re-executes that — which only lines up if the
+  increment was backed out and the decrement, which is part of forming the address, was not.
+  `addrop()` now hands the pending increment to `dati()`/`dato()`, which commit it when the cycle
+  completes and undo it when it does not. `MMR1` is left recording the change, frozen as the
+  hardware freezes it. Not carried over to `cpu20/ka11.c`: no tape decides it there.
+- **`MOV` dropped a failed destination write.** Alone among the instructions which write memory it
+  ignored the result of `writedest()`, so a bus timeout or MMU abort on the destination of a `MOV`
+  silently did nothing instead of trapping. The tape catches it with a `MOV` to a read-only page.
+
+Also in this tape's way: the `printf()` for an unimplemented 0700xx instruction, which `FKABD1`
+sweeps to check that the whole group traps as reserved — 200 lines of debug output per pass. It is a
+`trace()` now.
+
 ### The basic instruction set: five defects found by FKAAC0
 
 `FKAAC0`, the 11/34 basic instruction test, halted after 2206 instructions. Fixing what it reported

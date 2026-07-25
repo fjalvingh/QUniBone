@@ -50,6 +50,11 @@ struct KD11EA
 	// vector of the trap the "be" path has to take: 4 for a bus timeout,
 	// 0250 for a memory management abort.
 	word trap_vector;
+	// an autoincrement done by addrop() whose reference has not been made
+	// yet: it is only committed once that bus cycle completes. Register
+	// number, or -1 for none, and the amount added.
+	int autoinc_reg;
+	int autoinc_amount;
 
 	KT11D mmu;
 
