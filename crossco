@@ -129,10 +129,16 @@ if [ "$GENERATE_COMPILE_COMMANDS" -eq 1 ]; then
     echo "Error: 'bear' is required to generate compile_commands.json (sudo apt install bear)." >&2
     exit 1
   fi
-  # Only the ARM build belongs in compile_commands.json: the CPU tests are a
-  # separate, host-compiled make invocation and would contradict its -DARM/-DUNIBUS
-  # entries for the same core sources.
   bear --output "$COMPILE_COMMANDS" -- make || exit 1
+  # The cputest harness sources (papertape.cpp, testbus.cpp, ...) are unique to
+  # this host-compiled build and never appear in the ARM one, so add them too.
+  # Skip ka11.o/kd11ea.o/kt11d.o (CORE_OBJECTS in the cputest makefile): those
+  # source files ARE already in the database from the ARM build with
+  # -DARM/-DUNIBUS, and compiling them again here without those defines would
+  # just overwrite those entries with flags no real device build ever uses.
+  CPUTEST_OBJDIR="$QUNIBONE_DIR/10.05_cputest/4_deploy"
+  CPUTEST_HARNESS_OBJS="$CPUTEST_OBJDIR/cputest.o $CPUTEST_OBJDIR/papertape.o $CPUTEST_OBJDIR/testbus.o $CPUTEST_OBJDIR/testcore.o $CPUTEST_OBJDIR/testcore_cpu20.o $CPUTEST_OBJDIR/testcore_cpu34.o"
+  bear --append --output "$COMPILE_COMMANDS" -- make -C "$CPUTEST_DIR" $CPUTEST_HARNESS_OBJS || exit 1
 else
   make || exit 1
 fi
