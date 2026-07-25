@@ -74,7 +74,7 @@ conversions before pulling arguments.
 
 ## 2. Showstopper bugs
 
-### 2.1 The cores re-initialize a live mutex on every RESET instruction
+### 2.1 The cores re-initialize a live mutex on every RESET instruction — FIXED 2026-07-25
 
 `cpu20/ka11.c:118` and `cpu34/kd11ea.c:165`, inside `*_reset()`:
 

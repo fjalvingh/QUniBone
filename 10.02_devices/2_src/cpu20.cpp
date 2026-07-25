@@ -51,6 +51,7 @@ cpu20_c::cpu20_c() :
     ka11 = (struct KA11 *) calloc(1, sizeof(struct KA11));
     assert(bus && ka11);
     ka11->bus = bus;
+    ka11_init(ka11); // the intr mutex, shared with the qunibusadapter thread
 }
 
 cpu20_c::~cpu20_c()

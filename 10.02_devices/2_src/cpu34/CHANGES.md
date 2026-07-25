@@ -12,6 +12,20 @@ contract to the QUNIBUS adapter is `../cpu_bus_adapter.h`.
 
 ## Unreleased
 
+### RESET no longer re-initializes the interrupt mutex
+
+`kd11ea_reset()` ran on every RESET opcode (i.e. at every OS boot) and did
+`cpu->mutex = PTHREAD_MUTEX_INITIALIZER` — overwriting a mutex the qunibusadapter worker thread
+may hold, or be blocked on, inside `kd11ea_setintr()`. That is undefined behaviour; the plausible
+symptom is a machine that silently stops taking interrupts after a reboot. The mutex is now
+initialized exactly once by the new `kd11ea_init()`, called when the owning `cpu34_c` (or the
+cputest harness core) is created, and `kd11ea_reset()` clears `external_intr` under the lock
+instead. Same fix applied in tandem to `../cpu20/ka11.c`, where the bug was inherited from.
+
+Verified: cross-compile plus the full cputest run (33 passing runs unchanged, the three open KT11-D
+tapes unchanged). Not run on real hardware — the race needs a device interrupt racing a RESET, which
+the single-threaded cputest harness cannot produce.
+
 ### Four defects found by code review, none decided by a tape
 
 All in `kd11ea.c`, from a full-tree review; the XXDP suite passes before and after (`FKACA0`, the

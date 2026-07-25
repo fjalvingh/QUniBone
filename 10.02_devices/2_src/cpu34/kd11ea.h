@@ -75,6 +75,7 @@ struct KD11EA
 void kd11ea_set_psw(KD11EA *cpu, word newpsw);
 void kd11ea_tracestate(KD11EA *cpu);
 void kd11ea_printstate(KD11EA *cpu);
+void kd11ea_init(KD11EA *cpu);		// once at creation, before other threads exist
 void kd11ea_reset(KD11EA *cpu);		// RESET opcode: does not touch the KT11-D
 void kd11ea_power_reset(KD11EA *cpu);	// console START / power-up: clears all
 void kd11ea_setintr(KD11EA *cpu, unsigned vec);

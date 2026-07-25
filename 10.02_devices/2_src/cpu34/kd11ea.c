@@ -154,6 +154,16 @@ kd11ea_printstate(KD11EA *cpu)
 	printf(KD11EA_STATE_FMT, KD11EA_STATE_ARGS);
 }
 
+// to be called once when the object holding the KD11EA is created, before any
+// other thread can call kd11ea_setintr(). kd11ea_reset() must never touch the
+// mutex again: it runs on every RESET opcode, and re-initializing a mutex the
+// qunibusadapter thread holds in kd11ea_setintr() is undefined behavior.
+void
+kd11ea_init(KD11EA *cpu)
+{
+	pthread_mutex_init(&cpu->mutex, NULL);
+}
+
 // only to be called from kd11ea_condstep() thread
 void
 kd11ea_reset(KD11EA *cpu)
@@ -161,8 +171,10 @@ kd11ea_reset(KD11EA *cpu)
 	Busdev *bd;
 
 	cpu->traps = 0;
+	pthread_mutex_lock(&cpu->mutex) ;
 	cpu->external_intr = 0;
-	cpu->mutex = PTHREAD_MUTEX_INITIALIZER ;
+	pthread_mutex_unlock(&cpu->mutex) ;
+
 	// The KT11-D is deliberately NOT touched here: on real hardware the RESET
 	// opcode pulses bus INIT, which does not reach the memory management.
 	// An OS executing RESET must keep its address map - see kd11ea_power_reset()

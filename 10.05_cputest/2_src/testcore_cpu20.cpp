@@ -41,6 +41,7 @@ public:
         memset(&bus, 0, sizeof(bus));
         memset(&ka11, 0, sizeof(ka11));
         ka11.bus = &bus;
+        ka11_init(&ka11);
         // The 11/20 SWAB leaves V unchanged; cpu20_c defaults swab_vbit to
         // false too, and the ZKA* diagnostics expect the real 11/20 behaviour.
         ka11.swab_vbit = 0;

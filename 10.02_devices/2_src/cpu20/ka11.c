@@ -107,6 +107,16 @@ ka11_printstate(KA11 *cpu)
 		cpu->ba, cpu->ir, cpu->psw);
 }
 
+// to be called once when the object holding the KA11 is created, before any
+// other thread can call ka11_setintr(). ka11_reset() must never touch the
+// mutex again: it runs on every RESET opcode, and re-initializing a mutex the
+// qunibusadapter thread holds in ka11_setintr() is undefined behavior.
+void
+ka11_init(KA11 *cpu)
+{
+	pthread_mutex_init(&cpu->mutex, NULL);
+}
+
 // only to be called from ka11_condstep() thread
 void
 ka11_reset(KA11 *cpu)
@@ -114,8 +124,9 @@ ka11_reset(KA11 *cpu)
 	Busdev *bd;
 
 	cpu->traps = 0;
+	pthread_mutex_lock(&cpu->mutex) ;
 	cpu->external_intr = 0;
-	cpu->mutex = PTHREAD_MUTEX_INITIALIZER ;
+	pthread_mutex_unlock(&cpu->mutex) ;
 
 	for(bd = cpu->bus->devs; bd; bd = bd->next)
 		bd->reset(bd->dev);

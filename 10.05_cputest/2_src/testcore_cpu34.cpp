@@ -44,6 +44,7 @@ public:
         memset(&bus, 0, sizeof(bus));
         memset(&kd11ea, 0, sizeof(kd11ea));
         kd11ea.bus = &bus;
+        kd11ea_init(&kd11ea);
     }
 
     const char *name(void) override

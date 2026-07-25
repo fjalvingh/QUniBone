@@ -47,6 +47,7 @@ cpu34_c::cpu34_c() :
     kd11ea = (struct KD11EA *) calloc(1, sizeof(struct KD11EA));
     assert(bus && kd11ea);
     kd11ea->bus = bus;
+    kd11ea_init(kd11ea); // the intr mutex, shared with the qunibusadapter thread
 }
 
 cpu34_c::~cpu34_c()
