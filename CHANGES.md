@@ -4,6 +4,35 @@ Notable changes to QUniBone, newest first.
 
 ## Unreleased
 
+### MFPS with a register destination no longer aborts the emulator
+
+`FKTHB0` killed the process outright — `Assertion '0' failed` in `addrop()` of `kd11ea.c`, no `FAIL`
+line at all, and on a BeagleBone the same path would abort `demo`. The instruction is `MFPS R1` at
+020566, the read-back half of the diagnostic's MTPS/MFPS walk of the priority field. `addrop()`
+computes an address, so it starts at mode 1 and asserts on mode 0; every other direct caller guards
+that (`MFPI`/`MTPI` branch to a register-mode path, `JSR`/`JMP` do `goto ill`, the `RD_U` macro is
+itself `if(dm != 0) …`) and the MFPS case was the one written without a guard. `MFPS Rn` is a legal
+KD11-EA instruction, not something that should trap.
+
+**Changed**
+
+- `10.02_devices/2_src/cpu34/kd11ea.c` — the MFPS case of `step()`. `addrop()` is now called only
+  for `dm != 0`, and three further bugs on the same lines are fixed with it: the destination was
+  written as a word (`by = 0`), where MFPS writes one byte to memory and sign extends PS<7> through
+  the whole word into a register, like MOVB; `addrop()` was passed byte flag 0, so `(R0)+`/`-(R0)`
+  stepped by 2 instead of 1; and no condition codes were set at all, where MFPS sets N from PS<7>
+  and Z from the byte, clears V and leaves C.
+- `10.05_cputest/3_tapes/README.md` — FKTHB0 moved from "aborts the emulator" into the ordinary
+  failing set, with the diagnosis above; the recorded FKTFA0 halt address corrected to 001660.
+
+**Verified**: on the host, `10.05_cputest`, 36 runs. FKTHB0 no longer aborts; it gets some 9000
+times further, into the KT11-D abort test at 030034…030120, and now fails on the instruction limit
+instead — an endless loop, not a slow tape: 6 G instructions do not finish it either. Every other
+tape is bit-for-bit unchanged against a binary built from the unmodified core —
+the 26 PDP-11/20 runs and `FKTBA0`/`FKTCA0`/`FKTDA1` still pass, and `FKAAC0`, `FKABD1`, `FKACA0`,
+`FKTAA0`, `FKTFA0` fail at the same PC after the same instruction count as before. No hardware run:
+`cpu.cpp` and the PRUs are untouched.
+
 ### FKTGC0 ignored in the CPU test suite
 
 `FKTGC0` exercises the KL11 console itself, far beyond what the minimal KL11 stub of the fake bus

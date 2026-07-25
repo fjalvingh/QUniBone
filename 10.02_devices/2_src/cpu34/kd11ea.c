@@ -879,12 +879,20 @@ step(KD11EA *cpu)
 		if(!by)
 			goto ri;
 		TR(MFPS);
-		by = 0;
-		if(addrop(cpu, dst, 0)) goto be;
-//		RD_U;
-		b = cpu->psw & 0377;
-//		printf("mfps: res=%o\n", b);
-		WR; SVC;
+		// mode 0 is the register itself: addrop() computes an address and
+		// starts at mode 1, so it must not be called for it. A byte
+		// instruction, so the autoincrement/decrement step is 1.
+		if(dm != 0)
+			if(addrop(cpu, dst, 1)) goto be;
+		// PS<7> is sign extended into a register destination - like MOVB,
+		// and unlike the other byte ops, which leave the high half alone.
+		b = sxt(cpu->psw & 0377);
+		CLV; NZ;	// C is not affected
+		if(dm == 0)
+			cpu->r[df] = b;
+		else
+			WR;
+		SVC;
 	}
 
 	switch(cpu->ir & 0107400){

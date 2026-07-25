@@ -23,8 +23,7 @@ cores. They do not need to be copied here.
 | ZKAAA0 … ZKAMA0 (13) | cpu20 | **all pass** |
 | ZKAAA0 … ZKAMA0 (13) | cpu34 | **all pass** |
 | `cpu34/FKTBA0`, `FKTCA0`, `FKTDA1` | cpu34 | **pass** |
-| `cpu34/FKAAC0`, `FKABD1`, `FKACA0`, `FKTAA0`, `FKTFA0` | cpu34 | **fail** — see below |
-| `cpu34/FKTHB0` | cpu34 | **aborts** the emulator — see below |
+| `cpu34/FKAAC0`, `FKABD1`, `FKACA0`, `FKTAA0`, `FKTFA0`, `FKTHB0` | cpu34 | **fail** — see below |
 | `cpu34/FKTGC0` | cpu34 | **ignored** (`ignore = 1` in its `.opt`) — see below |
 
 **Six of the ten 11/34 XXDP diagnostics still fail, so the build is red.** That
@@ -69,19 +68,52 @@ this set objects so far.
 **`FKTBA0` and `FKTCA0` pass** as a result; the other four now get past the PSW —
 `FKTAA0` runs 4.5 M instructions instead of 227 — and fail on the defects below.
 
-### 2. `assert(0)` in `addrop()` aborts the emulator (1 tape)
+### 2. MFPS with a register destination — fixed
 
-`FKTHB0` reaches `addrop()` in `kd11ea.c` with addressing mode 0, which does
-`assert(0)`. The process dies with
+`FKTHB0` used to abort the emulator outright, with no `FAIL` line at all:
 
 ```
 cputest: kd11ea.c:335: int addrop(KD11EA*, int, int): Assertion `0' failed.
 ```
 
-so this tape produces no `FAIL` line at all, only an abort. A register-mode
-operand where a memory address is required is an illegal instruction on a real
-PDP-11 and should trap through vector 4; it should never be able to kill the
-emulator. On the BeagleBone the same path would abort `demo`.
+Instruction 958 of the run, at 020566, is `106701` — `MFPS R1`, destination
+mode 0. It is the read-back half of the MTPS/MFPS walk of the priority field:
+
+```
+020560  005000          CLR  R0
+020562  005001          CLR  R1
+020564  106400          MTPS R0
+020566  106701          MFPS R1          <-- aborted here
+020570  042701 177437   BIC  #177437,R1  ; keep PS<7:5>
+020574  020001          CMP  R0,R1
+020576  001401          BEQ  .+4
+020600  104003          EMT  3           ; error report
+020602  062700 000040   ADD  #40,R0      ; next priority level
+020606  022700 000400   CMP  #400,R0
+020612  001363          BNE  020560
+```
+
+`addrop()` computes an *address*, so it starts at mode 1 (`case 0: // REG …
+this already is mode 1`) and answers mode 0 with `assert(0)`. Every other
+direct caller guards it — `MFPI`/`MTPI` branch to a register-mode path,
+`JSR`/`JMP` do `if(dm == 0) goto ill`, and the `RD_U` macro is itself
+`if(dm != 0) …`, which is why the `MTPS R0` one instruction earlier was fine.
+The MFPS case was the one written without a guard. This is not an illegal
+instruction needing a trap through vector 4: `MFPS R1` is perfectly legal and
+the diagnostic tests it deliberately.
+
+Three further bugs sat on the same line and are fixed with it:
+
+- the destination was written as a **word** (`by = 0`). MFPS writes one byte to
+  memory, and to a register it sign extends PS<7> through the whole word — like
+  MOVB, and unlike the other byte ops, whose `writedest()` path leaves the high
+  half alone;
+- `addrop(cpu, dst, 0)` passed byte flag 0, so `(R0)+`/`-(R0)` stepped by 2
+  instead of 1;
+- no condition codes were set at all. MFPS sets N from PS<7> and Z from the
+  byte, clears V and leaves C.
+
+The tape now runs instead of aborting, and fails much later — see below.
 
 ### 3. HALT and RESET outside kernel mode — fixed
 
@@ -126,7 +158,7 @@ the threads — which is what keeps a run repeatable:
 
 **`FKTDA1` passes** as a result, in 63805 instructions.
 
-### 5. Not yet diagnosed (5 tapes)
+### 5. Not yet diagnosed (6 tapes)
 
 - `FKAAC0` — 2206 instructions, then a HALT at 012132 reached from a `MOV R0,(R0)`
   condition code check around 012104; the diagnostic's own error report path, so a
@@ -135,8 +167,16 @@ the threads — which is what keeps a run repeatable:
 - `FKTAA0` — 4.5 M instructions, then a HALT at 003060.
 - `FKTFA0` — 150 instructions. After a deliberate MMU abort it verifies the frozen
   MMR0/MMR1/MMR2 (all three compare equal) and then a register against 016700,
-  which does not match, and halts at 001656.
+  which does not match, and halts at 001660.
 - `FKACA0` — spins around 004174 until the 400 M instruction limit.
+- `FKTHB0` — reaches the 400 M instruction limit at 030114, in the KT11-D abort
+  test at 030034…030120. Each iteration plants a three word routine at the
+  address in R1, jumps to it, takes the MMU abort, and checks that the frozen
+  MMR2 holds that same address; R1 then steps by 2 up to 111002 and the sweep
+  restarts. The check itself never fails — no `EMT 36` — the tape simply never
+  reaches an end of pass. It is not merely slow: 6 G instructions, 15 times the
+  limit, do not finish it either, and it is still cycling through code it had
+  already reached after 2 M, so a bigger `maxsteps` is not the answer.
 
 ### 6. Ignored: `FKTGC0`
 
