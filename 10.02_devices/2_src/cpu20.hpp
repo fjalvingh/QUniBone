@@ -29,11 +29,10 @@
 
 #include "cpu.hpp"
 
-// The KA11 core is plain C, see cpu20/ka11.h and cpu20/11.h.
-// Only cpu20.cpp includes those headers, so that cpu20.hpp and cpu34.hpp
-// can be used together in one compilation unit.
+// The KA11 core is plain C, see cpu20/ka11.h and cpu_core.h.
+// Only cpu20.cpp includes those headers, so that cpu20.hpp stays free of the
+// core's types.
 struct KA11;
-struct Bus;
 
 class cpu20_c: public cpu_base_c {
 public:
@@ -41,7 +40,6 @@ public:
     cpu20_c();
     ~cpu20_c();
 
-    struct Bus *bus; // UNIBUS interface of CPU
     struct KA11 *ka11; // Angelos CPU state
 
     // 11/20 specific option

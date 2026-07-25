@@ -38,11 +38,10 @@
 
 #include "cpu.hpp"
 
-// The KD11-EA core is plain C, see cpu34/kd11ea.h and cpu34/11.h.
-// Only cpu34.cpp includes those headers, so that cpu20.hpp and cpu34.hpp
-// can be used together in one compilation unit.
+// The KD11-EA core is plain C, see cpu34/kd11ea.h and cpu_core.h.
+// Only cpu34.cpp includes those headers, so that cpu34.hpp stays free of the
+// core's types.
 struct KD11EA;
-struct Bus;
 
 class cpu34_c: public cpu_base_c {
 public:
@@ -50,7 +49,6 @@ public:
     cpu34_c();
     ~cpu34_c();
 
-    struct Bus *bus; // UNIBUS interface of CPU
     struct KD11EA *kd11ea; // CPU state
 
     // interface to the KD11-EA emulation core

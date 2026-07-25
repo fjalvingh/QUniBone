@@ -30,9 +30,9 @@
  are prefixed ka11_ and kd11ea_, which is also why the application can offer
  both CPU models at once.
 
- The private headers cpu20/11.h and cpu34/11.h must never meet in one
- compilation unit, so the two implementations live in separate .cpp files and
- only this abstract class crosses between them.
+ The two implementations live in separate .cpp files, mirroring the
+ cpu20.cpp/cpu34.cpp split on the application side; only this abstract class
+ crosses between them.
  */
 #ifndef _TESTCORE_HPP_
 #define _TESTCORE_HPP_

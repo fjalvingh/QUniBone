@@ -33,7 +33,7 @@
 #include "logger.hpp"
 
 #include "cpu20.hpp"
-#include "cpu20/11.h"
+#include "cpu_core.h"
 #include "cpu20/ka11.h"
 
 cpu20_c::cpu20_c() :
@@ -47,17 +47,14 @@ cpu20_c::cpu20_c() :
     swab_vbit.value = false;
 
     // emulation core state. Not in the header, so cpu20.hpp stays free of ka11.h
-    bus = (struct Bus *) calloc(1, sizeof(struct Bus));
     ka11 = (struct KA11 *) calloc(1, sizeof(struct KA11));
-    assert(bus && ka11);
-    ka11->bus = bus;
+    assert(ka11);
     ka11_init(ka11); // the intr mutex, shared with the qunibusadapter thread
 }
 
 cpu20_c::~cpu20_c()
 {
     free(ka11);
-    free(bus);
 }
 
 /*** interface to the KA11 emulation core ***/

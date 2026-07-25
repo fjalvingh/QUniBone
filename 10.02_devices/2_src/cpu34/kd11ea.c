@@ -8,41 +8,19 @@
  into the same binary as the KA11 core of the 11/20.
  */
 
-#include "11.h"
+#include "cpu_core.h"
 #include "kt11d.h"
 #include "kd11ea.h"
 #include <stdlib.h>
 
 #include "cpu_debug_pins.h" // ARM_DEBUG_PIN*, no-ops off the BBB
 
-// unibone_*() declared in cpu_bus_adapter.h, included via 11.h
+// unibone_*() declared in cpu_bus_adapter.h, included via cpu_core.h
 
 /* EIS (MUL, DIV, ASH, ASHC, XOR, SOB) and MFPS/MTPS are native 11/34
    instructions and always executed. On the 11/20 they do not exist.
    SWAB is a CPU feature which is still a runtime parameter of cpu20_c. */
 #define KD11EA_SWAB_VBIT	1	// SWAB clears the V bit
-
-static int
-dati_bus(Bus *bus)
-{
-	unsigned int data;
-	if(!unibone_dati(bus->addr, &data))
-		return 1;
-	bus->data = data;
-	return 0;
-}
-
-static int
-dato_bus(Bus *bus)
-{
-	return !unibone_dato(bus->addr, bus->data);
-}
-
-static int
-datob_bus(Bus *bus)
-{
-	return !unibone_datob(bus->addr, bus->data);
-}
 
 enum {
 	PSW_PR = 0340,
@@ -95,11 +73,6 @@ kd11ea_set_psw(KD11EA *cpu, word newpsw)
 enum {
 	TRAP_STACK = 1,
 	TRAP_PWR = 2,
-	TRAP_BR7 = 4,
-	TRAP_BR6 = 010,
-	TRAP_BR5 = 040,
-	TRAP_BR4 = 0100,
-	TRAP_CSTOP = 01000	// can't happen?
 };
 
 #define ISSET(f) ((cpu->psw&(f)) != 0)
@@ -164,12 +137,12 @@ kd11ea_init(KD11EA *cpu)
 	pthread_mutex_init(&cpu->mutex, NULL);
 }
 
-// only to be called from kd11ea_condstep() thread
+// only to be called from kd11ea_condstep() thread.
+// The devices on the bus are reset by unibone_bus_init(), which the RESET
+// opcode pulses separately; there is no core-internal device list.
 void
 kd11ea_reset(KD11EA *cpu)
 {
-	Busdev *bd;
-
 	cpu->traps = 0;
 	pthread_mutex_lock(&cpu->mutex) ;
 	cpu->external_intr = 0;
@@ -179,9 +152,6 @@ kd11ea_reset(KD11EA *cpu)
 	// opcode pulses bus INIT, which does not reach the memory management.
 	// An OS executing RESET must keep its address map - see kd11ea_power_reset()
 	// for the console START / power-up case.
-
-	for(bd = cpu->bus->devs; bd; bd = bd->next)
-		bd->reset(bd->dev);
 }
 
 // console START and power-up: everything kd11ea_reset() does, plus the state
@@ -240,7 +210,10 @@ autoinc_undo(KD11EA *cpu)
 static int
 dati(KD11EA *cpu, int b)
 {
-	uint32 pa;
+	// = 0: kt11d_relocate() sets pa on every success return, but that is
+	// beyond what -Wmaybe-uninitialized can see at -O3
+	uint32 pa = 0;
+	unsigned int d;
 	word w;
 
 	if(!b && cpu->ba&1)
@@ -252,31 +225,31 @@ dati(KD11EA *cpu, int b)
 	/* internal registers */
 	if(pa >= 0760000){
 		if(kt11d_read_reg(&cpu->mmu, pa & ~1, &w)){
-			cpu->bus->data = w;
+			cpu->bdata = w;
 			goto ok;
 		}
 		switch(pa){
 		case 0777570: case 0777571:
-			cpu->bus->data = cpu->sw;
+			cpu->bdata = cpu->sw;
 			goto ok;
 		case 0777776: case 0777777:
 			// the odd byte reads PSW<15:8>: the caller shifts it down
-			cpu->bus->data = cpu->psw & PSW_MASK;
+			cpu->bdata = cpu->psw & PSW_MASK;
 			goto ok;
 
 		/* respond but don't return real data */
 		case 0777547:
-			cpu->bus->data = 0;
+			cpu->bdata = 0;
 			goto ok;
 		}
 	}
 
-	cpu->bus->addr = pa&~1;
-	if(dati_bus(cpu->bus))
+	if(!unibone_dati(pa&~1, &d))
 		goto be;
+	cpu->bdata = W(d);
 ok:
-if (unibone_trace_addr(cpu->ba))
- 	trace("DATI [%06o] => %06o\n", cpu->ba, cpu->bus->data);
+	if(cpu->tracing && unibone_trace_addr(cpu->ba))
+		trace("DATI [%06o] => %06o\n", cpu->ba, cpu->bdata);
 	cpu->be = 0;
 	autoinc_commit(cpu);
 	return 0;
@@ -296,11 +269,11 @@ abort:
 static int
 dato(KD11EA *cpu, int b)
 {
-	uint32 pa;
+	uint32 pa = 0;	// see dati()
 	word mask;
 
-if (unibone_trace_addr(cpu->ba)) // default: all
-trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bus->data);
+	if(cpu->tracing && unibone_trace_addr(cpu->ba))
+		trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bdata);
 	if(!b && cpu->ba&1)
 		goto be;
 
@@ -309,9 +282,9 @@ trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bus->data);
 
 	/* internal registers */
 	if(pa >= 0760000){
-		// bus->data already holds the byte in the half selected by the address
+		// bdata already holds the byte in the half selected by the address
 		mask = b ? (pa&1 ? 0177400 : 0377) : 0177777;
-		if(kt11d_write_reg(&cpu->mmu, pa & ~1, cpu->bus->data, mask))
+		if(kt11d_write_reg(&cpu->mmu, pa & ~1, cpu->bdata, mask))
 			goto ok;
 		switch(pa){
 		case 0777570: case 0777571:
@@ -327,18 +300,16 @@ trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bus->data);
 			// RTI/RTT can set it.
 			mask &= ~PSW_T;
 			kd11ea_set_psw(cpu, (cpu->psw & ~mask) |
-					(cpu->bus->data & mask));
+					(cpu->bdata & mask));
 			goto ok;
 		}
 	}
 
 	if(b){
-		cpu->bus->addr = pa;
-		if(datob_bus(cpu->bus))
+		if(!unibone_datob(pa, cpu->bdata))
 			goto be;
 	}else{
-		cpu->bus->addr = pa&~1;
-		if(dato_bus(cpu->bus))
+		if(!unibone_dato(pa&~1, cpu->bdata))
 			goto be;
 	}
 ok:
@@ -355,27 +326,6 @@ abort:
 	cpu->be++;
 	autoinc_undo(cpu);
 	return 1;
-}
-
-static void
-svc(KD11EA *cpu, Bus *bus)
-{
-	int l;
-	Busdev *bd;
-	static int brtraps[4] = { TRAP_BR4, TRAP_BR5, TRAP_BR6, TRAP_BR7 };
-	for(l = 0; l < 4; l++){
-		cpu->br[l].bg = nil;
-		cpu->br[l].dev = nil;
-	}
-	cpu->traps &= ~(TRAP_BR4|TRAP_BR5|TRAP_BR6|TRAP_BR7);
-	for(bd = bus->devs; bd; bd = bd->next){
-		l = bd->svc(bus, bd->dev);
-		if(l >= 4 && l <= 7 && cpu->br[l-4].bg == nil){
-			cpu->br[l-4].bg = bd->bg;
-			cpu->br[l-4].dev = bd->dev;
-			cpu->traps |= brtraps[l-4];
-		}
-	}
 }
 
 static int
@@ -416,12 +366,12 @@ addrop(KD11EA *cpu, int m, int b)
 		cpu->ba = cpu->r[7];
 		cpu->r[7] += 2;
 		if(dati(cpu, 0)) return 1;
-		cpu->b = cpu->ba = cpu->bus->data + cpu->r[r];
+		cpu->b = cpu->ba = cpu->bdata + cpu->r[r];
 		break;
 	}
 	if(m&1){
 		if(dati(cpu, 0)) return 1;
-		cpu->b = cpu->ba = cpu->bus->data;
+		cpu->b = cpu->ba = cpu->bdata;
 	}
 	return 0;
 
@@ -436,7 +386,7 @@ fetchop(KD11EA *cpu, int t, int m, int b)
 		cpu->r[t] = cpu->r[r];
 	else{
 		if(dati(cpu, b)) return 1;
-		cpu->r[t] = cpu->bus->data;
+		cpu->r[t] = cpu->bdata;
 		if(b && cpu->ba&1) cpu->r[t] = cpu->r[t]>>8;
 	}
 	if(b) cpu->r[t] = sxt(cpu->r[t]);
@@ -459,7 +409,7 @@ writedest(KD11EA *cpu, word v, int b)
 		else cpu->r[d] = v;
 	}else{
 		if(cpu->ba&1) v <<= 8;
-		cpu->bus->data = v;
+		cpu->bdata = v;
 		if(dato(cpu, b)) return 1;
 	}
 	return 0;
@@ -537,16 +487,20 @@ step(KD11EA *cpu)
 // the trap pushes are always kernel references, MFPI/MTPI use the previous mode
 #define SPACE(s)	cpu->mmu.access_space = (s)
 #define SPACE_RESTORE	cpu->mmu.access_space = cpu->mmu.space
-#define OUT(a,d)	cpu->ba = (a); cpu->bus->data = (d); if(dato(cpu, 0)) goto be
-#define IN(d)	if(dati(cpu, 0)) goto be; d = cpu->bus->data
-#define INA(a,d)	cpu->ba = a; if(dati(cpu, 0)) goto be; d = cpu->bus->data
-#define TR(m)	if (unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"\n", PC-2)
-#define TRB(m)	if (unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"%s\n", PC-2, by ? "B" : "")
+#define OUT(a,d)	cpu->ba = (a); cpu->bdata = (d); if(dato(cpu, 0)) goto be
+#define IN(d)	if(dati(cpu, 0)) goto be; d = cpu->bdata
+#define INA(a,d)	cpu->ba = a; if(dati(cpu, 0)) goto be; d = cpu->bdata
+#define TR(m)	if (cpu->tracing && unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"\n", PC-2)
+#define TRB(m)	if (cpu->tracing && unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"%s\n", PC-2, by ? "B" : "")
 
 	inhov = 0;
 
-	{
-		// external interrupt from parallel threads?
+	// external interrupt from parallel threads? The unlocked read is the
+	// fast path: the flag is only ever raised by the other thread, so a
+	// stale 0 read here just takes the interrupt one instruction later -
+	// no different from the interrupt arriving a moment later. A raised
+	// flag is confirmed under the mutex before it is consumed.
+	if (cpu->external_intr) {
 		pthread_mutex_lock(&cpu->mutex) ;
 		bool external_intr = cpu->external_intr ;
 		word external_intrvec = cpu->external_intrvec ;
@@ -943,7 +897,7 @@ step(KD11EA *cpu)
 			SPACE(cpu->mmu.prev_space);
 			if(dati(cpu, 0)){ SPACE_RESTORE; goto be; }
 			SPACE_RESTORE;
-			b = cpu->bus->data;
+			b = cpu->bdata;
 		}
 		CLV; NZ;
 		PUSH; OUT(SP, b);
@@ -961,7 +915,7 @@ step(KD11EA *cpu)
 				cpu->r[df] = b;
 		}else{
 			if(addrop(cpu, dst, 0)) goto be;
-			cpu->bus->data = b;
+			cpu->bdata = b;
 			SPACE(cpu->mmu.prev_space);
 			if(dato(cpu, 0)){ SPACE_RESTORE; goto be; }
 			SPACE_RESTORE;
@@ -1122,8 +1076,8 @@ be:	if(cpu->be > 1){
 	TRAP(cpu->trap_vector);
 
 trap:
-	if (unibone_trace_addr(PC-2))
-	trace("TRAP %o\n", TV);
+	if (cpu->tracing && unibone_trace_addr(PC-2))
+		trace("TRAP %o\n", TV);
 	trapped_pc = PC;
 	trapped_psw = PSW;
 	/* The vector is read through kernel space and *before* the mode switch:
@@ -1131,8 +1085,8 @@ trap:
 	   installed - which switches the stack pointer - and only then are the
 	   old PSW and PC pushed, onto the new mode's stack. */
 	SPACE(KT11D_SPACE_KERNEL);
-	BA = TV;	if(dati(cpu, 0)) goto be;	newpc = cpu->bus->data;
-	BA = TV+2;	if(dati(cpu, 0)) goto be;	newpsw = cpu->bus->data;
+	BA = TV;	if(dati(cpu, 0)) goto be;	newpc = cpu->bdata;
+	BA = TV+2;	if(dati(cpu, 0)) goto be;	newpsw = cpu->bdata;
 	SPACE_RESTORE;
 	// previous mode of the new PSW := the mode the trap came from
 	newpsw = (newpsw & ~030000) | ((trapped_psw >> 2) & 030000);
@@ -1143,8 +1097,8 @@ trap:
 	/* no trace trap after a trap */
 	oldpsw = PSW;
 
-	if (unibone_trace_addr(PC-2))
-	kd11ea_tracestate(cpu);
+	if (cpu->tracing && unibone_trace_addr(PC-2))
+		kd11ea_tracestate(cpu);
 	/* The trap sequence ends at an instruction boundary: the processor
 	   arbitrates again here, *before* the first instruction of the handler
 	   runs. That matters for the kernel stack limit, whose violation is
@@ -1155,7 +1109,6 @@ trap:
 	SVC;
 
 service:
-	c = (PSW >> 5) & 7;	// PSW is 16 bits now, mask the priority out
 	if(oldpsw & PSW_T){
 		oldpsw &= ~PSW_T;
 		TRAP(014);
@@ -1166,18 +1119,6 @@ service:
 	}else if(cpu->traps & TRAP_PWR){
 		cpu->traps &= ~TRAP_PWR;
 		TRAP(024);
-	}else if(c < 7 && cpu->traps & TRAP_BR7){
-		cpu->traps &= ~TRAP_BR7;
-		TRAP(cpu->br[3].bg(cpu->br[3].dev));
-	}else if(c < 6 && cpu->traps & TRAP_BR6){
-		cpu->traps &= ~TRAP_BR6;
-		TRAP(cpu->br[2].bg(cpu->br[2].dev));
-	}else if(c < 5 && cpu->traps & TRAP_BR5){
-		cpu->traps &= ~TRAP_BR5;
-		TRAP(cpu->br[1].bg(cpu->br[1].dev));
-	}else if(c < 4 && cpu->traps & TRAP_BR4){
-		cpu->traps &= ~TRAP_BR4;
-		TRAP(cpu->br[0].bg(cpu->br[0].dev));
 	}else
 	// TODO? console stop
 		/* fetch next instruction */
@@ -1211,11 +1152,12 @@ kd11ea_pwrup_vector_fetch(KD11EA *cpu)
 {
 	// caller must have issued reset()
 	// cpu->traps &= ~TRAP_PWR; // no, would be a fix
+	cpu->tracing = unibone_trace_enabled();
 	INA(024, PC);
 	BA = 024+2; if(dati(cpu, 0)) goto be;
 	// through kd11ea_set_psw(): the vector may select user mode, which picks
 	// the other stack pointer and address space
-	kd11ea_set_psw(cpu, cpu->bus->data);
+	kd11ea_set_psw(cpu, cpu->bdata);
 	return ;
 be:
 	trace("BE\n");
@@ -1227,7 +1169,7 @@ kd11ea_condstep(KD11EA *cpu)
 {
 	if(cpu->state == KD11EA_STATE_RUNNING || cpu->state == KD11EA_STATE_WAITING)
 		// GRANT Interrupts before opcode fetch, or when CPU is on WAIT
-	unibone_grant_interrupts() ;
+		unibone_grant_interrupts() ;
 
 	if((cpu->state == KD11EA_STATE_RUNNING) ||
 	   (cpu->state == KD11EA_STATE_WAITING && cpu->traps)
@@ -1235,7 +1177,9 @@ kd11ea_condstep(KD11EA *cpu)
 		cpu->state = KD11EA_STATE_RUNNING;
 		// external_intr WAIT handled atomically in kd11ea_setintr() !
 
-		svc(cpu, cpu->bus);
+		// is trace() output live at all? Cached once per instruction so
+		// the trace sites cost a flag test each when it is not.
+		cpu->tracing = unibone_trace_enabled();
 		step(cpu);
 	}
 }

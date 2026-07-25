@@ -7,9 +7,10 @@
  the abort bookkeeping, and the register decode.
  */
 
-#include "11.h"
+#include "cpu_core.h"
 #include "kt11d.h"
 #include <stdarg.h>
+#include <string.h>	// memset
 
 /* ACF, the access control field. On the KT11-D this is PDR<2:1>, two bits,
  and there are no "trap" modes - every illegal access aborts.

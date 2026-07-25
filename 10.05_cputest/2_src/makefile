@@ -158,25 +158,25 @@ $(OBJDIR)/testcore.o: testcore.cpp testcore.hpp | $(OBJDIR)
 	$(HOST_CXX) $(CXXFLAGS) $< -o $@
 
 $(OBJDIR)/testcore_cpu20.o: testcore_cpu20.cpp testcore.hpp \
-		$(DEVICE_SRC_DIR)/cpu20/11.h $(DEVICE_SRC_DIR)/cpu20/ka11.h | $(OBJDIR)
+		$(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu20/ka11.h | $(OBJDIR)
 	$(HOST_CXX) $(CXXFLAGS) $< -o $@
 
 $(OBJDIR)/testcore_cpu34.o: testcore_cpu34.cpp testcore.hpp \
-		$(DEVICE_SRC_DIR)/cpu34/11.h $(DEVICE_SRC_DIR)/cpu34/kd11ea.h | $(OBJDIR)
+		$(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu34/kd11ea.h | $(OBJDIR)
 	$(HOST_CXX) $(CXXFLAGS) $< -o $@
 
 ### the emulation cores under test, compiled from the shipped sources
 
 $(OBJDIR)/ka11.o: $(DEVICE_SRC_DIR)/cpu20/ka11.c $(DEVICE_SRC_DIR)/cpu20/ka11.h \
-		$(DEVICE_SRC_DIR)/cpu20/11.h $(DEVICE_SRC_DIR)/cpu_bus_adapter.h \
+		$(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu_bus_adapter.h \
 		$(DEVICE_SRC_DIR)/cpu_debug_pins.h | $(OBJDIR)
 	$(HOST_CXX) $(CORE_CXXFLAGS) -I$(DEVICE_SRC_DIR)/cpu20 -x c++ $< -o $@
 
 $(OBJDIR)/kd11ea.o: $(DEVICE_SRC_DIR)/cpu34/kd11ea.c $(DEVICE_SRC_DIR)/cpu34/kd11ea.h \
-		$(DEVICE_SRC_DIR)/cpu34/11.h $(DEVICE_SRC_DIR)/cpu34/kt11d.h \
+		$(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu34/kt11d.h \
 		$(DEVICE_SRC_DIR)/cpu_bus_adapter.h $(DEVICE_SRC_DIR)/cpu_debug_pins.h | $(OBJDIR)
 	$(HOST_CXX) $(CORE_CXXFLAGS) -I$(DEVICE_SRC_DIR)/cpu34 -x c++ $< -o $@
 
 $(OBJDIR)/kt11d.o: $(DEVICE_SRC_DIR)/cpu34/kt11d.c $(DEVICE_SRC_DIR)/cpu34/kt11d.h \
-		$(DEVICE_SRC_DIR)/cpu34/11.h $(DEVICE_SRC_DIR)/cpu_bus_adapter.h | $(OBJDIR)
+		$(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu_bus_adapter.h | $(OBJDIR)
 	$(HOST_CXX) $(CORE_CXXFLAGS) -I$(DEVICE_SRC_DIR)/cpu34 -x c++ $< -o $@

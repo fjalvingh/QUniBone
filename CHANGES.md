@@ -2,6 +2,47 @@
 
 Notable changes to QUniBone, newest first.
 
+### CPU emulation cores: per-instruction overhead cut, dead bus abstraction removed, one shared header
+
+The emulated CPUs paid for machinery they never used on every single instruction. Three sources of
+per-instruction ARM-side overhead are gone, and the leftover abstraction they lived in with them:
+
+- **Tracing is now a flag test, not a call chain.** `unibone_trace_addr()` answers *true* when the
+  tracer is disabled, so every instruction and every DATI/DATO called `trace()` → `unibone_log()` →
+  `logger->vlog()` just to have the message discarded at the log-level check — and with a CPU log
+  level of DEBUG, each of those became gettimeofday + gettid + mutex + FIFO push. The previously
+  unused `unibone_trace_enabled()` now means "is trace() output going anywhere at all"
+  (`10.02_devices/2_src/cpu.cpp` implements it as the LL_DEBUG logger gate; the cputest testbus
+  already had its `tracing` flag). The cores cache it once per instruction in a new `cpu->tracing`
+  field and every hot trace site tests that flag first. Trace output semantics are unchanged.
+- **No mutex on the interrupt fast path.** `step()` took `cpu->mutex` every instruction to check
+  `external_intr`. The volatile flag is now read unlocked first; the mutex is only taken — and the
+  flag re-checked under it — when it was seen raised. A stale read just takes the interrupt one
+  instruction later, indistinguishable from the interrupt arriving later.
+- **The `Bus`/`Busdev` machinery was dead code.** `bus->devs` was never populated by QUniBone or by
+  the test harness — device reset comes from bus INIT, interrupts from `external_intr` — yet
+  `svc()` walked it and cleared `br[]` before every instruction. Removed entirely from both cores
+  (`svc()`, `br[4]`, `TRAP_BR4..7`, `TRAP_CSTOP`, the `bg()` dispatch in `service:`); the former
+  `Bus.data` is now a `bdata` member of the CPU structs, one pointer chase less on every bus cycle,
+  and `dati()`/`dato()` call `unibone_dati()`/`dato()`/`datob()` directly.
+- **One shared basics header.** The near-identical private twins `cpu20/11.h` and `cpu34/11.h`
+  (which could never meet in one compilation unit) are merged into
+  `10.02_devices/2_src/cpu_core.h`; first groundwork for merging the two cores later. The
+  `Bus *bus` members and forward declarations disappear from `cpu20.hpp`/`cpu34.hpp`, cpu20.cpp/
+  cpu34.cpp and the cputest testcore wrappers.
+- **Build**: all ARM code is now compiled `-mcpu=cortex-a8` (`10.03_app_demo/2_src/makefile.common`)
+  instead of generic armv7-a scheduling.
+
+All of the above went into both cores (`cpu20/ka11.c`, `cpu34/kd11ea.c`) alike.
+
+This does *not* touch the dominant per-instruction cost, the PRU round-trip in
+`unibone_grant_interrupts()` — that fast path is designed but a separate change.
+
+**Verified**: cross-compile only (`./crossco`, UNIBUS), no hardware run. The CPU core test suite
+passes unchanged — 32 of 36, with the 3 known KT11-D failures reproducing bit-identically (same
+halt PCs, same instruction counts) before and after, and `FKABD1` confirmed passing already before
+this change. The cores also compile warning-free at `-O3`.
+
 ### One shared makefile for the UNIBUS and QBUS builds
 
 Adding a device used to require editing `10.03_app_demo/2_src/makefile_u` **and** `makefile_q`,

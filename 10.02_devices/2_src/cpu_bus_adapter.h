@@ -65,7 +65,11 @@ void unibone_prioritylevelchange(uint8_t level);
 // CPU executed a RESET opcode: pulse the INIT line
 void unibone_bus_init(void);
 
-// selective tracing of EXEC cycles
+// selective tracing of EXEC cycles.
+// unibone_trace_enabled(): is trace() output going anywhere at all? The cores
+// cache the answer in their cpu->tracing flag once per instruction, so an
+// inactive tracer costs a flag test per trace site, not a call.
+// unibone_trace_addr(): address filter, consulted only when tracing is live.
 bool unibone_trace_enabled(void);
 bool unibone_trace_addr(uint16_t a);
 

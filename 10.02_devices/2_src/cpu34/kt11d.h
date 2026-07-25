@@ -19,7 +19,7 @@
  Everything is prefixed kt11d_/KT11D, like the rest of cpu34/, because this
  core is linked into the same binary as the KA11 core of the 11/20.
 
- This header needs cpu34/11.h to be included first.
+ This header needs cpu_core.h to be included first.
  */
 #ifndef _KT11D_H_
 #define _KT11D_H_

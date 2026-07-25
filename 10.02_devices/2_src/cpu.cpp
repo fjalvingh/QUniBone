@@ -218,13 +218,17 @@ void unibone_bus_init()
 }
 
 
-// selective tracing of EXEC cycles
+// Is trace() output live at all? trace() records at LL_DEBUG, so this is the
+// logger level gate. The cores cache the answer in cpu->tracing once per
+// instruction: with tracing off, all their per-cycle trace sites cost one
+// flag test each instead of a call chain into the logger.
 bool unibone_trace_enabled()
 {
-    return unibone_cpu->tracer.enabled ;
+    return !logger->ignored(unibone_cpu, LL_DEBUG) ;
 }
 
-// shell and address be traced?
+// shall this address be traced? Only consulted when tracing is live;
+// with the address filter disabled, everything is traced.
 bool unibone_trace_addr(uint16_t a)
 {
     return !unibone_cpu->tracer.enabled || unibone_cpu->tracer.addr[a] ;

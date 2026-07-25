@@ -28,19 +28,16 @@
 
 #include "testcore.hpp"
 
-#include "cpu20/11.h"
+#include "cpu_core.h"
 #include "cpu20/ka11.h"
 
 class testcore_cpu20_c: public testcore_c {
 private:
-    struct Bus bus;
     struct KA11 ka11;
 public:
     testcore_cpu20_c()
     {
-        memset(&bus, 0, sizeof(bus));
         memset(&ka11, 0, sizeof(ka11));
-        ka11.bus = &bus;
         ka11_init(&ka11);
         // The 11/20 SWAB leaves V unchanged; cpu20_c defaults swab_vbit to
         // false too, and the ZKA* diagnostics expect the real 11/20 behaviour.

@@ -31,7 +31,8 @@
 #include "logger.hpp"
 
 #include "cpu34.hpp"
-#include "cpu34/11.h"
+#include "cpu_core.h"
+#include "cpu34/kt11d.h"
 #include "cpu34/kd11ea.h"
 
 cpu34_c::cpu34_c() :
@@ -43,17 +44,14 @@ cpu34_c::cpu34_c() :
     log_label = "cpu34";
 
     // emulation core state. Not in the header, so cpu34.hpp stays free of kd11ea.h
-    bus = (struct Bus *) calloc(1, sizeof(struct Bus));
     kd11ea = (struct KD11EA *) calloc(1, sizeof(struct KD11EA));
-    assert(bus && kd11ea);
-    kd11ea->bus = bus;
+    assert(kd11ea);
     kd11ea_init(kd11ea); // the intr mutex, shared with the qunibusadapter thread
 }
 
 cpu34_c::~cpu34_c()
 {
     free(kd11ea);
-    free(bus);
 }
 
 /*** interface to the KD11-EA emulation core ***/

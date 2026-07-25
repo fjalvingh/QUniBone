@@ -22,8 +22,8 @@
 
  Mirrors cpu34.cpp, minus everything that needs a QUNIBUS.
 
- Must be a separate compilation unit from testcore_cpu20.cpp: cpu34/11.h and
- cpu20/11.h define the same types and must never meet.
+ A separate compilation unit from testcore_cpu20.cpp, mirroring the
+ cpu20.cpp/cpu34.cpp split on the application side.
  */
 
 #include <stdlib.h>
@@ -31,19 +31,17 @@
 
 #include "testcore.hpp"
 
-#include "cpu34/11.h"
+#include "cpu_core.h"
+#include "cpu34/kt11d.h"
 #include "cpu34/kd11ea.h"
 
 class testcore_cpu34_c: public testcore_c {
 private:
-    struct Bus bus;
     struct KD11EA kd11ea;
 public:
     testcore_cpu34_c()
     {
-        memset(&bus, 0, sizeof(bus));
         memset(&kd11ea, 0, sizeof(kd11ea));
-        kd11ea.bus = &bus;
         kd11ea_init(&kd11ea);
     }
 

@@ -9,7 +9,7 @@
 
  The change log of this directory is cpu34/CHANGES.md.
 
- This header needs cpu34/11.h and cpu34/kt11d.h to be included first.
+ This header needs cpu_core.h and cpu34/kt11d.h to be included first.
  */
 #ifndef _KD11EA_H_
 #define _KD11EA_H_
@@ -34,9 +34,9 @@ struct KD11EA
 {
 	word r[16];
 	word b;		// B register before BUT JSRJMP
-	word ba;
+	word ba;	// bus address register of the current DATI/DATO
+	word bdata;	// bus data register of the current DATI/DATO
 	word ir;
-	Bus *bus;
 	// PSW<15:14> current mode, <13:12> previous mode, <7:5> priority,
 	// <4> T, <3:0> NZVC. Never assign it directly: kd11ea_set_psw() also
 	// switches the stack pointer and tells the MMU and the arbitrator.
@@ -58,15 +58,14 @@ struct KD11EA
 
 	KT11D mmu;
 
-	struct {
-		int (*bg)(void *dev);
-		void *dev;
-	} br[4];
-
 	// UniBone
 	pthread_mutex_t mutex ;
 	volatile bool external_intr ; // INTR by parallel thread pending
 	volatile word external_intrvec;	// associated vector
+
+	// cached unibone_trace_enabled(), refreshed once per instruction: the
+	// per-cycle trace sites test only this flag when tracing is off
+	bool tracing;
 
 	word sw;
 };
