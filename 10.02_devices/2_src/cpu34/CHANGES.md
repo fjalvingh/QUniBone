@@ -12,6 +12,33 @@ contract to the QUNIBUS adapter is `../cpu_bus_adapter.h`.
 
 ## Unreleased
 
+### Four defects found by code review, none decided by a tape
+
+All in `kd11ea.c`, from a full-tree review; the XXDP suite passes before and after (`FKACA0`, the
+EIS tape, exercises all four instructions but happens not to pin any of these cases down).
+
+- **ASHC with shift count -32 was undefined behaviour.** The right-shift path computes a positive
+  count 1..32, and 32 reached `val >>= sh` on a `uint32_t` — undefined in C, and actually different
+  on x86 (value unchanged) and ARM, so the cputest harness and the BeagleBone could disagree. The
+  count-32 case is now explicit: all sign bits, C from the sign. The `1 << (sh - 1)` carry test on
+  the remaining path was also UB at 32 (`1 << 31` on a signed int) and is `1u` now.
+- **ASH left by 17 or more set V only for an initially negative operand.** The hardware shifts
+  iteratively and sets V on a sign change at *any* step, and shifting ≥ 17 drives every bit of a
+  nonzero operand through the sign position — so any nonzero operand overflows, e.g.
+  `ASH #21, R0` with `R0 = 1` passes through 0100000 on its way to 0. V is now set for any nonzero
+  operand.
+- **MTPS in user mode could raise the priority.** PSW<7:5> was loaded from the operand regardless of
+  mode, letting a user program lock out interrupts. It now keeps its value outside kernel mode, the
+  same restriction RTI/RTT already had. This closes the "left alone deliberately" note under the
+  KT11-D entry below.
+- **DIV with an odd register trapped as a reserved instruction.** The hardware does not trap; the
+  register pair select simply wraps so both halves are the same register, as `ASHC` already modelled
+  (`reg | 1`). DIV now does the same. The result for an odd register is "unpredictable" on hardware,
+  so nothing depends on which half wins.
+
+Verified: cross-compile plus the full cputest run (33 passing runs unchanged, the three open KT11-D
+tapes unchanged). Not run on real hardware.
+
 ### Traps: three defects found by FKABD1
 
 `FKABD1`, the 11/34 trap test, lost control after 3480 instructions and ended in a double bus error.

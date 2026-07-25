@@ -341,20 +341,33 @@ void logger_c::vlog(logsource_c *logsource, unsigned msglevel, bool late_evaluat
         assert(sizeof(msg.printf_format) > strlen(fmt) + 1);
         strcpy(msg.printf_format, fmt);
 
-        assert(LOGMESSAGE_ARGCOUNT >= 10);
-        /*
-         va_copy(msg.print_args, args) ; // same arguments
-         */
-        msg.printf_args[0] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[1] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[2] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[3] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[4] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[5] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[6] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[7] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[8] = va_arg(args, LOGMESSAGE_ARGTYPE);
-        msg.printf_args[9] = va_arg(args, LOGMESSAGE_ARGTYPE);
+        // Reading more varargs than the caller passed is undefined behavior,
+        // so pull only as many as the format consumes. Counts one argument
+        // per conversion plus one per '*' width/precision; message_render()
+        // always passes all LOGMESSAGE_ARGCOUNT slots to snprintf, which is
+        // fine - printf ignores excess arguments.
+        {
+            unsigned argcount = 0;
+            const char *p;
+            for (p = fmt; *p; p++) {
+                if (*p != '%')
+                    continue;
+                if (p[1] == '%') {
+                    p++; // literal "%%", no argument
+                    continue;
+                }
+                argcount++;
+                // '*' in flags/width/precision consumes an extra argument
+                while (p[1] && strchr("-+ #0123456789.*", p[1])) {
+                    p++;
+                    if (*p == '*')
+                        argcount++;
+                }
+            }
+            assert(argcount <= LOGMESSAGE_ARGCOUNT);
+            for (unsigned i = 0; i < LOGMESSAGE_ARGCOUNT; i++)
+                msg.printf_args[i] = (i < argcount) ? va_arg(args, LOGMESSAGE_ARGTYPE) : 0;
+        }
     } else {
         // eval printf now
         auto r = std::vsnprintf(msg.printf_format, sizeof(msg.printf_format), fmt, args);

@@ -662,10 +662,12 @@ step(KD11EA *cpu)
 			case 0071000:		TR(DIV);
 				RD_U;
               	cpu->psw &= ~(PSW_N|PSW_Z|PSW_V|PSW_C);
-				if(reg & 0x1) goto ri;			// for div register must be even
+				// An odd register does not trap on the hardware; the pair
+				// select simply wraps, so both halves are the same register
+				// (result "unpredictable"). Same convention as ASHC.
 				{
 					int32_t dv = (int16_t) DR;
-					prod = (uint32_t) cpu->r[reg + 1] | ((uint32_t) cpu->r[reg] << 16);
+					prod = (uint32_t) cpu->r[reg | 1] | ((uint32_t) cpu->r[reg] << 16);
 					if(DR == 0) {
 						SEC;
 						SEV;
@@ -675,7 +677,7 @@ step(KD11EA *cpu)
 							SEV;
 						} else {
 							cpu->r[reg] = (word) d.quot;
-							cpu->r[reg + 1] = (word) (d.rem);
+							cpu->r[reg | 1] = (word) (d.rem);
 						}
 						if(sgn(d.quot))
 							SEN;
@@ -722,7 +724,11 @@ step(KD11EA *cpu)
                 		//-- Nothing -> only set Z and N flags
                 		NZ;
                 	} else if(sh >= 17) {
-                		if(sgn(b))
+                		// The hardware shifts iteratively and sets V on a sign
+                		// change at *any* step. Shifting >= 17 moves every bit
+                		// of a nonzero operand through the sign position, so
+                		// any nonzero value overflows - not just negative ones.
+                		if(b & 0xffff)
                 			SEV;
 						b = 0;
 						CLC;
@@ -758,15 +764,27 @@ step(KD11EA *cpu)
 					sh = (DR & 0x3f);					// Extract 6 bits
 					if(sh & 0x20) {						// -ve?
 						// we shift right
-						sh = 0x40 - sh;					// +ve shift, 1..62
+						sh = 0x40 - sh;					// +ve shift, 1..32
                 		uint32_t msk = val & B31 ? 0xffffffffL : 0x0;
-						if(val & (1 << (sh - 1)))
-							SEC;
-						else
-							CLC;
-						val >>= sh;
-						msk <<= (32 - sh);
-						val |= msk;				// Sign extend
+						if(sh >= 32) {
+							// Shift count -32: everything shifted out, all
+							// sign bits remain, C gets the sign bit. Kept
+							// out of the shift expressions below - a 32-bit
+							// shift by 32 is undefined in C.
+							val = msk;
+							if(msk)
+								SEC;
+							else
+								CLC;
+						} else {
+							if(val & (1u << (sh - 1)))
+								SEC;
+							else
+								CLC;
+							val >>= sh;
+							msk <<= (32 - sh);
+							val |= msk;				// Sign extend
+						}
 						if(val == 0)
 							SEZ;
 						if(val & B31)
@@ -903,7 +921,13 @@ step(KD11EA *cpu)
 		// changes PSW<7:5>, so the arbitrator has to be told: go through
 		// kd11ea_set_psw(). The mode bits are not affected, and neither is
 		// the T bit - MTPS cannot set it.
-		kd11ea_set_psw(cpu, (cpu->psw & (0xff00|PSW_T)) | (DR & (0377 & ~PSW_T)));
+		b = DR & (0377 & ~PSW_T);
+		// In user mode MTPS may not change the priority PSW<7:5> either -
+		// same restriction as RTI/RTT below - or a user program could lock
+		// out interrupts.
+		if(!IS_KERNEL(cpu))
+			b = (b & ~PSW_PR) | (PSW & PSW_PR);
+		kd11ea_set_psw(cpu, (cpu->psw & (0xff00|PSW_T)) | b);
 		SVC;
 
 	/* MFPI/MTPI address in the current mode but transfer in the previous

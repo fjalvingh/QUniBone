@@ -410,7 +410,7 @@ step(KA11 *cpu)
 		RD_B; CLV;
 		b = SR; NZ;
 		if(dm==0) cpu->r[df] = SR;
-		else writedest(cpu, SR, by);
+		else if(writedest(cpu, SR, by)) goto be;
 		SVC;
 	case 0120000: case 0020000:	TRB(CMP);
 		RD_B; CLCV;
