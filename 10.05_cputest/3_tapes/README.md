@@ -16,180 +16,197 @@ in, from where they are vendored at
 `10.02_devices/2_src/cpu20/pdp11-master/maindec/`, and are run against both
 cores. They do not need to be copied here.
 
-## Current state
+## Test results
 
-| tapes | core | result |
+This is the state of the suite; it is what the build reports, not a wish list.
+Only the failures of a test are described here — how a defect was fixed belongs
+in `CHANGES.md` (repo root) and `10.02_devices/2_src/cpu34/CHANGES.md`.
+
+The description of a tape is its own banner text where it prints one; where it
+does not, it says what the run is seen to exercise.
+
+| tape | what it tests | cpu20 | cpu34 |
+|---|---|---|---|
+| `ZKAAA0` … `ZKAMA0` (13 tapes) | MAINDEC-11-DZKAA … DZKAM, the PDP-11/20 instruction set tests. No banner text; vendored with the 11/20 core | **PASS** (13/13) | **PASS** (13/13) |
+| `cpu34/FKAAC0` | MAINDEC-11-DFKAA-C, "11/34 BSC INST TST" — basic instruction set | — | **FAIL** |
+| `cpu34/FKABD1` | MAINDEC-11-DFKAB-D, "11/34 TRAPS TST" — trap vectors, trap-within-trap, the kernel stack limit | — | **FAIL** |
+| `cpu34/FKACA0` | MAINDEC-11-DFKAC-A, no banner — EIS (MUL/DIV/ASH/ASHC) and MFPS/MTPS exerciser | — | **FAIL** (harness, not the core) |
+| `cpu34/FKTAA0` | MAINDEC-11-DFKTA-A, "11/34 MEMORY MANAGEMENT LOGIC TEST" — KT11-D registers and relocation | — | **FAIL** |
+| `cpu34/FKTBA0` | MAINDEC-11-DFKTB-A, "11/34 MEMORY MANAG. ACCESS KEYS TEST" — PDR access control | — | **PASS** (4032661 instructions) |
+| `cpu34/FKTCA0` | MAINDEC-11-DFKTC-A, no banner — MFPI/MTPI/MFPD/MTPD between the kernel and user spaces | — | **PASS** (758275 instructions) |
+| `cpu34/FKTDA1` | MAINDEC-11-DFKTD-A, no banner — mode protection: HALT and RESET outside kernel mode, previous-mode instructions, device interrupts | — | **PASS** (63805 instructions) |
+| `cpu34/FKTFA0` | MAINDEC-11-DFKTF-A, no banner — MMU aborts and the frozen MMR0/MMR1/MMR2 | — | **FAIL** |
+| `cpu34/FKTGC0` | MAINDEC-11-DFKTG-C, no banner — drives the KL11 console itself | — | **SKIP** (`ignore = 1`) |
+| `cpu34/FKTHB0` | MAINDEC-11-DFKTH-B, "11/34 MEMORY MGMT. DIAG." — full KT11-D diagnostic | — | **FAIL** |
+
+29 of 36 runs pass, 1 is skipped, **6 fail, so the build is red**. That is
+deliberate: the failures are real defects the tapes exist to find, and there is
+no expected-failure mechanism to hide them. `SKIP_CPUTESTS=1` or `./crossco -n`
+builds without running them.
+
+`FKTGC0` is skipped rather than failed because it tests console hardware the
+fake bus does not have, so its result says nothing about the CPU core: it sends
+the whole character set 0…177 round and round through the interrupt driven KL11
+transmitter and halts at 003300 after 13 sweeps. Its `.opt` sidecar sets
+`ignore = 1`, and keeps `bell-is-pass = 0` for whenever it is re-enabled — a BEL
+is character 007 of its sweep, so this is the one tape whose console traffic is
+data and where a BEL must **not** be read as end of pass.
+
+## FKAAC0 — halt at 012132 after 2206 instructions
+
+A register source is read after the destination has been autoincremented.
+
+At 012112 the tape executes `010020` = `MOV R0,(R0)+` with `R0` = 0 and location
+0 = 177777:
+
+```
+012104  005000         CLR R0
+012106  005010         CLR (R0)
+012110  005110         COM (R0)         ; location 0 := 177777
+012112  010020         MOV R0,(R0)+     ; expected: store 000000, R0 -> 2, Z set
+012114  100402         BMI 012122       ; N must be clear
+012116  102401         BVS 012122       ; V must be clear
+012120  001404         BEQ 012132       ; Z must be set   <-- not taken
+012122  012742 000304  MOV #304,-(R2)   ; error report
+012126  005242         INC -(R2)
+012130  000000         HALT
+```
+
+The core writes **000002** to location 0 and leaves Z clear, so the `BEQ` falls
+into the error report and the HALT at 012130 (the runner reports the PC after
+it, 012132). The dump confirms it: `R0 000002`.
+
+`RD_B` in `kd11ea.c` reads memory-mode operands first and register-mode operands
+afterwards, so a register source is fetched *after* the destination's
+autoincrement has already updated that same register.
+
+## FKABD1 — double bus error, halt at 000006 after 3480 instructions
+
+The kernel stack limit trap is delivered one instruction too late, so the tape
+loses control.
+
+```
+011344  012706 000400  MOV #400,SP        ; stack right at the 400 limit
+011350  012767 011366 166426              ; vector 4 := 011366
+011356  012767 011400 166420              ; vector 4 := 011400, the handler
+011364  004700         JSR R7,R0          ; illegal: register destination -> trap 4
+011366  012737 000243 000302              ; fall-through error path, halts at 011376
+011400  012767 000006 166376              ; handler: vector 4 := 000006
+011406  020627 000370  CMP SP,#370        ; SP must be 370 by now
+011412  001405         BEQ 011426         ; continue
+011414  012737 000244 000302              ; error path, halts at 011424
+```
+
+The illegal `JSR` traps through vector 4 and pushes PS and PC at 000376/000374 —
+below the 400 kernel stack limit, so `addrop()` (`kd11ea.c`) sets `TRAP_STACK`.
+The handler expects `SP` = 000370 on entry, i.e. two *more* words pushed: the
+stack trap has to be taken as part of the trap sequence, before the handler's
+first instruction runs.
+
+The core instead takes it after the next instruction — which is the
+`MOV #6,@#4` at 011400 that has just repointed vector 4 at location 000006. The
+stack trap therefore vectors to PC 000006 with PS 000357. The word at 000006 is
+000357, decoded as `SWAB @(PC)+`, whose operand address 000357 is odd: bus
+error, trap through vector 4, PC 000006 again. Each turn of the loop pushes two
+more words, walking the stack down through 0 into the I/O page (it overwrites
+the MMU registers on the way — hence `MMR0 140017` in the dump, and
+`R6 177570`), until a push itself bus-errors and the harness reports a double
+bus error.
+
+## FKACA0 — instruction limit reached, no core defect seen
+
+This one is a harness limitation, not a KD11-EA failure. The tape signals end of
+pass **in text**, not with a BEL, so the runner's pass criterion never fires and
+the run ends on the instruction limit (400 M by default, at PC 004174).
+
+Run long, it keeps passing cleanly: in 300 M instructions it prints `END PASS`
+255 times (about 1.2 M instructions per pass) and nothing else, never halts and
+never reports an error. 1.5 G instructions behave the same way.
+
+Judging it needs a rule other than the BEL — the tape's console output has to be
+matched, or the pass has to be recognized some other way. Until then it is
+counted as a failure rather than hidden with `ignore = 1`, because the tape does
+run and does exercise the EIS instructions and MFPS.
+
+## FKTAA0 — halt at 003060 after 4522029 instructions
+
+MMR0<8>, maintenance ("destination") mode, is not implemented: `kt11d.c` knows
+only `KT11D_MMR0_ENABLE` (MMR0<0>), so with just bit 8 set relocation stays off
+altogether.
+
+The tape sets up kernel page 0 (KIPAR0 = 000001, KIPDR0 = 077406), writes
+000400 to MMR0 and then does:
+
+```
+003040  012701 003112  MOV #3112,R1
+003044  012777 000400 175752   ; MMR0 (177572) := 000400, maintenance mode
+003052  021111         CMP (R1),(R1)   ; the two reads must differ
+003054  001001         BNE .+4
+003056  000000         HALT
+```
+
+In maintenance mode only the destination reference is relocated, so the second
+read of `(R1)` should come from a different physical address than the first. The
+core relocates neither: both DATIs return 132465, the `BNE` is not taken and the
+tape halts at 003056 (reported as 003060). Only the banner has been printed at
+that point.
+
+## FKTFA0 — halt at 001660 after 150 instructions
+
+An autoincremented register is not the pre-abort value after an MMU abort.
+
+With relocation just enabled and virtual 016700 not mapped, `CMPB (R2)+,R2` at
+001610 (R2 = 016700) aborts through vector 250. The tape then checks the state
+frozen by the abort; each check is a `CMP` followed by `BEQ .+4` and a `HALT`, so
+the first one to fail stops the tape:
+
+```
+001604  005237 177572           ; INC MMR0: relocation on
+001610  122202         CMPB (R2)+,R2   ; aborts, vector 250
+001614  022706 001074  CMP SP,#1074           ; ok
+001624  022767 040001 175740     ; MMR0 = 040001?   ok
+001636  022767 001610 175732     ; MMR2 = 001610?   ok
+001650  022702 016700  CMP R2,#016700         ; <-- fails
+001654  001401         BEQ .+4
+001656  000000         HALT
+```
+
+The dump shows `R2 016701`: the byte autoincrement stands. `MMR1 000012`
+records exactly that change (+1 on R2). Whether the KD11-EA is supposed to back
+the register out itself, or never to have applied it on an aborted reference, is
+not established — MMR1 exists so that recovery software can undo it, which
+argues the tape expects something else here.
+
+## FKTHB0 — instruction limit reached at 030114 after 400 M instructions
+
+Not a hang: the tape completes **52 passes** inside the limit, and reports errors
+on every one of them, so it never prints the BEL that means "end of pass, no
+errors" and the runner only ever sees the limit. It is the broadest of the
+KT11-D tapes and finds a long list of defects. Distinct messages, with the
+number of times each was printed over those 52 passes:
+
+| times | message | test |
 |---|---|---|
-| ZKAAA0 … ZKAMA0 (13) | cpu20 | **all pass** |
-| ZKAAA0 … ZKAMA0 (13) | cpu34 | **all pass** |
-| `cpu34/FKTBA0`, `FKTCA0`, `FKTDA1` | cpu34 | **pass** |
-| `cpu34/FKAAC0`, `FKABD1`, `FKACA0`, `FKTAA0`, `FKTFA0`, `FKTHB0` | cpu34 | **fail** — see below |
-| `cpu34/FKTGC0` | cpu34 | **ignored** (`ignore = 1` in its `.opt`) — see below |
+| 13250 | `PAGE LGTH. ABORT DID NOT OCCUR WHEN IT SHOULD HAVE` | 36 |
+| 530 | `PHYS. ADDR. FORMED WRONG IN MAINT. MODE` | 25 |
+| 157 | `SR2 NOT TRACKING CORRECTLY` | 12 |
+| 156 | `MEM. MGMT. REG. BITS NOT SET CORRECTLY` | 12, 14 |
+| 53 | `MEM. MGMT. REG. WOULD NOT CLEAR` (MMR0 read back 160000) | 12 |
+| 53 | `SR1 DID NOT READ ALL ZEROS` (read 000027) | 14 |
+| 53 | `WRITING SR0 SET W-BIT IN KIPDR7` | 21 |
+| 53 | `DATA INCORRECT AFTER A MAINT. MODE WRITE` (wrote 177777, read 000377) | 24 |
+| 53 | `ILLEGAL MODE 01 NOT ABORTED` | 35 |
+| 52 | `SR0 WAS NOT CLEARED BY INIT.` | — |
+| 52 | `SR0 EFFECTED BY WRITE TO PSW` | — |
+| 52 | `SR0 OR SR2 CHANGED BY ODD ADDR. ERROR` | — |
+| 52 | `NON RESIDENT ABORT DID NOT OCCUR` | 41 |
+| 52 | `ERROR FLAG FOR NR ABORT (BIT15) IN SR0 DID NOT SET` | 41 |
+| 52 | `SR2 DID NOT FREEZE THE VIRTUAL ADDRS OF THE ABORTD INTR` | 41 |
 
-**Six of the ten 11/34 XXDP diagnostics still fail, so the build is red.** That
-is deliberate: the failures are real defects in the KD11-EA core which these
-tapes exist to find, and hiding them behind an expected-failure list was rejected
-in favour of keeping them visible. See the diagnosis below before assuming the
-test suite is broken.
-
-## Why the 11/34 diagnostics fail
-
-Diagnosed from the trace the runner prints on failure, on the core as of this
-writing.
-
-### 1. The PSW at 777776 — fixed
-
-Six tapes used to die after 3 to 227 instructions on their first access to the
-processor status word, because `kd11ea.c` `dati()`/`dato()` answered
-`case 0777776: case 0777777:` with a bus timeout — nothing on the machine
-implemented the PSW address, and the still-zero vector 4 turned the trap into a
-halt. That was inherited from the 11/20 KA11 and is wrong for the 11/34: the
-KD11-EA has MFPS/MTPS *as well as* the PSW address, not instead of it, and its
-diagnostics use 777776 routinely (it is the only way to reach the mode and
-priority bits).
-
-`dati()`/`dato()` now decode it, on the physical address like every other
-internal register:
-
-- a read returns `cpu->psw`; a byte read of 777777 gets PSW<15:8>, as the caller
-  shifts the odd half down itself;
-- a write goes through `kd11ea_set_psw()`, so changing the mode bits switches the
-  stack pointer and the KT11-D address space and a new PSW<7:5> reaches the
-  arbitrator. A DATOB writes only the addressed half, through the same `mask` the
-  KT11-D registers use;
-- `PSW_MASK` (0170377) is applied inside `kd11ea_set_psw()` rather than at the
-  bus, so the bits which have no flipflop on an 11/34 — PSW<11>, there being only
-  one register set, and the unused <10:8> — can never be loaded from any source:
-  777776, MTPS, RTI/RTT or a trap vector.
-
-The T bit is left writable from 777776, like the KA11 has it. No diagnostic in
-this set objects so far.
-
-**`FKTBA0` and `FKTCA0` pass** as a result; the other four now get past the PSW —
-`FKTAA0` runs 4.5 M instructions instead of 227 — and fail on the defects below.
-
-### 2. MFPS with a register destination — fixed
-
-`FKTHB0` used to abort the emulator outright, with no `FAIL` line at all:
-
-```
-cputest: kd11ea.c:335: int addrop(KD11EA*, int, int): Assertion `0' failed.
-```
-
-Instruction 958 of the run, at 020566, is `106701` — `MFPS R1`, destination
-mode 0. It is the read-back half of the MTPS/MFPS walk of the priority field:
-
-```
-020560  005000          CLR  R0
-020562  005001          CLR  R1
-020564  106400          MTPS R0
-020566  106701          MFPS R1          <-- aborted here
-020570  042701 177437   BIC  #177437,R1  ; keep PS<7:5>
-020574  020001          CMP  R0,R1
-020576  001401          BEQ  .+4
-020600  104003          EMT  3           ; error report
-020602  062700 000040   ADD  #40,R0      ; next priority level
-020606  022700 000400   CMP  #400,R0
-020612  001363          BNE  020560
-```
-
-`addrop()` computes an *address*, so it starts at mode 1 (`case 0: // REG …
-this already is mode 1`) and answers mode 0 with `assert(0)`. Every other
-direct caller guards it — `MFPI`/`MTPI` branch to a register-mode path,
-`JSR`/`JMP` do `if(dm == 0) goto ill`, and the `RD_U` macro is itself
-`if(dm != 0) …`, which is why the `MTPS R0` one instruction earlier was fine.
-The MFPS case was the one written without a guard. This is not an illegal
-instruction needing a trap through vector 4: `MFPS R1` is perfectly legal and
-the diagnostic tests it deliberately.
-
-Three further bugs sat on the same line and are fixed with it:
-
-- the destination was written as a **word** (`by = 0`). MFPS writes one byte to
-  memory, and to a register it sign extends PS<7> through the whole word — like
-  MOVB, and unlike the other byte ops, whose `writedest()` path leaves the high
-  half alone;
-- `addrop(cpu, dst, 0)` passed byte flag 0, so `(R0)+`/`-(R0)` stepped by 2
-  instead of 1;
-- no condition codes were set at all. MFPS sets N from PS<7> and Z from the
-  byte, clears V and leaves C.
-
-The tape now runs instead of aborting, and fails much later — see below.
-
-### 3. HALT and RESET outside kernel mode — fixed
-
-`FKTDA1` used to stop after 58 instructions, on the first of the KD11-EA's two
-kernel-only instructions. Both are fixed in `step()`:
-
-- **HALT** — the diagnostic points vector 10 at its own handler, sets the PSW to
-  140000 through 777776 (user mode, previous mode kernel) and executes a HALT.
-  Outside kernel mode that is a reserved instruction and traps through vector 10;
-  the core halted regardless of PSW<15:14>, ending the run.
-- **RESET** — the same test then enables the KL11 transmitter interrupt, executes
-  a RESET in user mode and expects the bit to *survive*: outside kernel mode
-  RESET is a no-op, so a user program cannot INIT the bus out from under the
-  devices. The core pulsed INIT whatever the mode.
-
-The kernel-mode half of that RESET test needed a fix in the harness rather than
-the core: `unibone_bus_init()` in `testbus.cpp` was empty, so INIT never cleared
-the interrupt enable of the KL11 stub. It now calls `testbus_c::bus_init()`.
-
-### 4. The fake bus grants device interrupts — fixed
-
-`FKTDA1` then set vector 64 to its own handler, enabled the KL11 transmitter
-interrupt with the transmitter ready, dropped the priority to 0 and waited for
-an interrupt that could not come: `unibone_grant_interrupts()` was empty and the
-register stubs had no way to ask for anything.
-
-`testbus.cpp` now does what the PRU arbitrator does on a real QUniBone, minus
-the threads — which is what keeps a run repeatable:
-
-- each KL11 half has an interrupt request flipflop, set when its ready/done flag
-  comes up with the interrupt enable on, or when the enable is turned on while
-  the flag is already up. Cleared by the GRANT, by clearing the enable and by
-  INIT: a request survives until it is served, but a served one is not repeated
-  until the device becomes ready again;
-- `unibone_prioritylevelchange()` keeps PSW<7:5> instead of dropping it — this is
-  what cpu.cpp hands to the PRU;
-- `unibone_grant_interrupts()`, which the core calls before every opcode fetch
-  and while it sits in a WAIT, grants the request if the CPU is below BR4 and
-  delivers the vector (060 receive, 064 transmit) through the new
-  `testcore_c::setintr()`, the same core entry `cpu_base_c::on_interrupt()` uses
-  on hardware.
-
-**`FKTDA1` passes** as a result, in 63805 instructions.
-
-### 5. Not yet diagnosed (6 tapes)
-
-- `FKAAC0` — 2206 instructions, then a HALT at 012132 reached from a `MOV R0,(R0)`
-  condition code check around 012104; the diagnostic's own error report path, so a
-  real instruction-test failure.
-- `FKABD1` — 3480 instructions, then a double bus error at PC 6.
-- `FKTAA0` — 4.5 M instructions, then a HALT at 003060.
-- `FKTFA0` — 150 instructions. After a deliberate MMU abort it verifies the frozen
-  MMR0/MMR1/MMR2 (all three compare equal) and then a register against 016700,
-  which does not match, and halts at 001660.
-- `FKACA0` — spins around 004174 until the 400 M instruction limit.
-- `FKTHB0` — reaches the 400 M instruction limit at 030114, in the KT11-D abort
-  test at 030034…030120. Each iteration plants a three word routine at the
-  address in R1, jumps to it, takes the MMU abort, and checks that the frozen
-  MMR2 holds that same address; R1 then steps by 2 up to 111002 and the sweep
-  restarts. The check itself never fails — no `EMT 36` — the tape simply never
-  reaches an end of pass. It is not merely slow: 6 G instructions, 15 times the
-  limit, do not finish it either, and it is still cycling through code it had
-  already reached after 2 M, so a bigger `maxsteps` is not the answer.
-
-### 6. Ignored: `FKTGC0`
-
-`FKTGC0` drives the KL11 itself, sending the whole character set 0…177 round
-and round through the interrupt driven transmitter, and halts at 003300 after
-13 sweeps. It tests far more console hardware behaviour than the minimal KL11
-stub in `testbus.cpp` provides, so its result says nothing about the CPU core —
-its `.opt` sidecar sets `ignore = 1` and the runner reports it as `SKIP`
-without running it. The sidecar also keeps `bell-is-pass = 0` for whenever it
-is re-enabled: a BEL is character 007 of its sweep, so this is the one tape
-whose console traffic is data and where a BEL must **not** be read as end of
-pass — otherwise it is called passed after 634 instructions, on the seventh
-character it prints.
+`SR0`/`SR1`/`SR2` are the tape's names for MMR0/MMR1/MMR2. The maintenance mode
+entries are the same missing MMR0<8> as `FKTAA0` above; the rest — page length
+and non-resident aborts not happening, MMR0 bits not settable or clearable,
+MMR2 not tracking or not freezing — are separate, undiagnosed KT11-D defects.
 
 ## A tape needs different settings?
 
@@ -216,13 +233,16 @@ MAINDEC reports an error) or if it never finishes within `maxsteps`.
 
 That rule only holds for a tape which uses the console to talk to the operator.
 One which exercises the KL11 as a device sends the whole character set as test
-data, BEL included, and is judged passed on its seventh character. Such a tape
-sets `bell-is-pass = 0` in its `.opt` sidecar and has to be judged some other
-way; `cpu34/FKTGC0.BIC` is the one example here.
+data, BEL included, and would be judged passed on its seventh character. Such a
+tape sets `bell-is-pass = 0` in its `.opt` sidecar and has to be judged some
+other way; `cpu34/FKTGC0.BIC` is the one example here. A tape which ends a pass
+in text instead of with a BEL cannot be judged by the rule either — see
+`FKACA0` above.
 
-On failure
-the run is replayed with tracing on to show the instructions leading up to it —
-that replay is what the diagnosis above is built from. To reproduce one by hand:
+On failure the run is replayed with tracing on to show the instructions leading
+up to it, followed by a dump of the CPU and MMU state; that replay is what the
+diagnoses above are built from. It is exact, because the fake bus is fully
+deterministic. To reproduce one by hand:
 
 ```bash
 10.05_cputest/4_deploy/cputest --core cpu34 \

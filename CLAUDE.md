@@ -202,9 +202,10 @@ emulation cores on the build machine, with no BeagleBone and no backplane involv
 > **The build is currently red on purpose.** The 26 PDP-11/20 runs (13 tapes × 2 cores) pass, as do
 > `FKTBA0`/`FKTCA0`/`FKTDA1` — 29 of 36; `FKTGC0` is skipped (`ignore = 1` in its `.opt` sidecar —
 > it tests console hardware the fake bus does not have, so its result says nothing about the core);
-> the other 6 XXDP 11/34 diagnostics in `3_tapes/cpu34/` still fail, on real defects in the KD11-EA
-> core: an `assert(0)` in `addrop()` that aborts the emulator outright, plus undiagnosed instruction
-> and MMU failures. There is deliberately no expected-failure mechanism to hide those — `ignore` is
+> the other 6 XXDP 11/34 diagnostics in `3_tapes/cpu34/` still fail: operand evaluation order
+> (`FKAAC0`), the kernel stack limit trap (`FKABD1`), the KT11-D maintenance mode and further MMU
+> defects (`FKTAA0`, `FKTFA0`, `FKTHB0`), and one — `FKACA0` — only because it signals end of pass in
+> text instead of with a BEL. There is deliberately no expected-failure mechanism to hide those — `ignore` is
 > only for tapes that are out of scope for the harness, not for known core defects. Full diagnosis
 > in `10.05_cputest/3_tapes/README.md`; use `SKIP_CPUTESTS=1` or `./crossco -n` to build while they
 > are outstanding.
