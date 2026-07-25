@@ -92,7 +92,7 @@ public:
 private:
 	// setup address tables, also in shared memory
 	// start both threads
-	void install(void);
+	bool install(void);
 
 	void uninstall(void);bool is_installed() {
 		return (handle > 0);

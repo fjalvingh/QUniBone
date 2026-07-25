@@ -124,7 +124,7 @@ power_event_ACLO_active) {...} power_event_ACLO_active = false;`). An event arri
 between the test and the unconditional clear is silently dropped — a missed power-fail
 trap or a missed reboot. Make them `std::atomic<bool>` and consume with `exchange(false)`.
 
-### 2.5 register_device() kills the whole application on a config error
+### 2.5 register_device() kills the whole application on a config error — FIXED 2026-07-25
 
 `qunibusadapter.cpp:175-177` — two devices configured at overlapping addresses (a plain
 user mistake at the interactive menu) hits `FATAL`, which is `exit(1)`

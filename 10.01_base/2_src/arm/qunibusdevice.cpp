@@ -76,7 +76,15 @@ bool qunibusdevice_c::on_param_changed(parameter_c *param)
 			priority_slot.readonly = true;
 			intr_vector.readonly = true;
 			intr_level.readonly = true;
-			install(); // visible on QBUS/UNIBUS
+			if (!install()) { // visible on QBUS/UNIBUS
+				// could not be plugged in (e.g. address conflict):
+				// unlock config again, deny the enable
+				base_addr.readonly = false;
+				priority_slot.readonly = false;
+				intr_vector.readonly = false;
+				intr_level.readonly = false;
+				return false ;
+			}
 			on_after_install() ;
 		} else {
 			// disable
@@ -114,9 +122,11 @@ void qunibusdevice_c::set_default_bus_params(uint32_t _default_base_addr,
 	intr_level.set(default_intr_level);
 }
 
-void qunibusdevice_c::install(void) 
+// result false: could not be plugged in (e.g. IO page address conflict)
+bool qunibusdevice_c::install(void)
 {
-	qunibusadapter->register_device(*this); // -> device_c ?
+	if (!qunibusadapter->register_device(*this)) // -> device_c ?
+		return false; // error already logged
 	// now has handle
 
 	// Reset device by generating DCLO power cycle.
@@ -124,6 +134,7 @@ void qunibusdevice_c::install(void)
 	on_power_changed(SIGNAL_EDGE_NONE, SIGNAL_EDGE_RAISING);
 	// ACLO active, DCLO inactive
 	on_power_changed(SIGNAL_EDGE_NONE, SIGNAL_EDGE_FALLING);
+	return true;
 }
 
 void qunibusdevice_c::uninstall(void) {

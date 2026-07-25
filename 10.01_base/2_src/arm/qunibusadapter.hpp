@@ -105,7 +105,7 @@ public:
 	// Helper for request processing
 	void requests_init(void);
 
-	void request_schedule(priority_request_c& request);
+	bool request_schedule(priority_request_c& request);
 	void requests_cancel_scheduled(void);
 	priority_request_c *request_activate_lowest_slot(unsigned level_index);
 //	bool request_is_active(		unsigned level_index);

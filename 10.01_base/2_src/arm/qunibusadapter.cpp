@@ -171,10 +171,15 @@ bool qunibusadapter_c::register_device(qunibusdevice_c& device)
         qunibusdevice_register_t *device_reg = &(device.registers[i]);
         device_reg->addr = device.base_addr.value + 2 * i;
         uint8_t reghandle = IOPAGE_REGISTER_ENTRY(*pru_iopage_registers, device_reg->addr);
-        if (reghandle != 0 && reghandle != IOPAGE_REGISTER_HANDLE_ROM)
-            FATAL(
+        if (reghandle != 0 && reghandle != IOPAGE_REGISTER_HANDLE_ROM) {
+            // plain user config error at the menu: refuse, don't exit()
+            ERROR(
                 "register_device() IO page address conflict: %s implements register at %s, belongs already to other device.",
                 device.name.value.c_str(), qunibus->addr2text(device_reg->addr));
+            devices[device_handle] = NULL; // give back the "backplane position"
+            device.handle = 0;
+            return false;
+        }
     }
 
     for (i = 0; i < 0x1000; i++) {
@@ -197,6 +202,8 @@ bool qunibusadapter_c::register_device(qunibusdevice_c& device)
     if (free_handles < device.register_count) {
         ERROR("register_device() can not register device %s, needs %d register, only %d left.",
               device.name.value.c_str(), device.register_count, free_handles);
+        devices[device_handle] = NULL; // give back the "backplane position"
+        device.handle = 0;
         return false;
     }
     register_handle++; // first free handle
@@ -360,7 +367,10 @@ void qunibusadapter_c::requests_init(void)
 
 // put a request into the level/slot table
 // do not yet activate!
-void qunibusadapter_c::request_schedule(priority_request_c& request) 
+// result false: request refused because of a slot conflict - a device
+// emulation bug, reported here with ERROR. The caller must fail the request,
+// not the whole application.
+bool qunibusadapter_c::request_schedule(priority_request_c& request)
 {
     // Must run under  pthread_mutex_lock(&requests_mutex);
     priority_request_level_c *prl = &request_levels[request.level_index];
@@ -368,17 +378,21 @@ void qunibusadapter_c::request_schedule(priority_request_c& request)
 
     // a device may reraise on of its own interrupts, but not an DMA on same slot
     if (dynamic_cast<dma_request_c *>(&request)) {
-        if (prl->slot_request[request.priority_slot] != NULL)
-            FATAL("Concurrent DMA requested for slot %d.", (unsigned )request.priority_slot);
+        if (prl->slot_request[request.priority_slot] != NULL) {
+            ERROR("Concurrent DMA requested for slot %d.", (unsigned )request.priority_slot);
+            return false;
+        }
     } else if (dynamic_cast<intr_request_c *>(&request)) {
         if (prl->slot_request[request.priority_slot] != NULL) {
             qunibusdevice_c *slotdevice = prl->slot_request[request.priority_slot]->device;
-            if (slotdevice != request.device)
-                FATAL(
+            if (slotdevice != request.device) {
+                ERROR(
                     "Devices %s and %s share both slot %u for INTR request with priority index %u",
                     slotdevice ? slotdevice->name.value.c_str() : "NULL",
                     request.device->name.value.c_str(), (unsigned )request.priority_slot,
                     (unsigned )request.level_index);
+                return false;
+            }
             // DEBUG("request_schedule(): update request %p into level %u, slot %u",&request, request.level_index, request.slot);
         } else {
             //	DEBUG("request_schedule(): insert request %p into level %u, slot %u",&request, request.level_index, request.slot);
@@ -387,6 +401,7 @@ void qunibusadapter_c::request_schedule(priority_request_c& request)
 
     prl->slot_request[request.priority_slot] = &request; // mark slot with request
     prl->slot_request_mask |= (1 << request.priority_slot);  // set slot bit
+    return true;
 }
 
 // Cancel all pending device_DMA and IRQ requests of every level.
@@ -648,8 +663,8 @@ void qunibusadapter_c::DMA(dma_request_c& dma_request, bool blocking, uint8_t qu
     // In contrast to re-raised INTR, overlapping DMA requests from same board
     // must not be ignored (different DATA situation) and are an device implementation error.
     // If a device indeed has multiple DMA channels, it must use different pseudo-slots.
+    // Detected and refused below by request_schedule().
     priority_request_level_c *prl = &request_levels[PRIORITY_LEVEL_INDEX_NPR];
-    assert(prl->slot_request[dma_request.priority_slot] == NULL); // not scheduled or prev completed
 
     // 	dma_request.level-index, priority_slot in constructor
     dma_request.complete = false;
@@ -668,7 +683,16 @@ void qunibusadapter_c::DMA(dma_request_c& dma_request, bool blocking, uint8_t qu
 
     // put into schedule tables
 
-    request_schedule(dma_request); // assertion, if twice for same slot
+    if (!request_schedule(dma_request)) {
+        // slot conflict (device emulation bug, logged there):
+        // fail this request, the device sees a completed transfer without success
+        pthread_mutex_lock(&dma_request.complete_mutex);
+        dma_request.complete = true;
+        pthread_cond_signal(&dma_request.complete_cond);
+        pthread_mutex_unlock(&dma_request.complete_mutex);
+        pthread_mutex_unlock(&requests_mutex);
+        return;
+    }
     if (!prl->active) {
 //	if (!request_is_active(dma_request.level_index)) {
         // no device_DMA current performed: start immediately
@@ -821,7 +845,12 @@ void qunibusadapter_c::INTR(intr_request_c& intr_request,
     }
 
     // put into schedule tables
-    request_schedule(intr_request); // assertion, if twice for same slot
+    if (!request_schedule(intr_request)) {
+        // slot conflict (device emulation bug, logged there): drop the INTR
+        intr_request.complete = true;
+        pthread_mutex_unlock(&requests_mutex);
+        return;
+    }
 
     if (!prl->active) {
         // INTR of this level can be raised immediately
