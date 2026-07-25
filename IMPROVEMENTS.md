@@ -104,7 +104,7 @@ thread mid-instruction (menu command, DCLO), the CPU worker thread hangs unrecov
 `workers_terminate` is never checked. A bounded spin with a diagnostic FATAL/ERROR after,
 say, 100 ms would turn an unexplained freeze into an actionable message.
 
-### 2.3 cancel_INTR(): check outside the lock, and `complete` never set
+### 2.3 cancel_INTR(): check outside the lock, and `complete` never set — FIXED 2026-07-25
 
 `qunibusadapter.cpp:852-886` — the early-return test of
 `prl->slot_request[...] == NULL` runs *before* `requests_mutex` is taken, racing with
