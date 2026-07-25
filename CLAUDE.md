@@ -203,15 +203,14 @@ The only automated tests in the tree. They run the MAINDEC instruction diagnosti
 emulation cores on the build machine, with no BeagleBone and no backplane involved, and both
 `./compile.sh` and `./crossco` run them after a successful build.
 
-> **The build is currently red on purpose.** The 26 PDP-11/20 runs (13 tapes × 2 cores) pass, as do
-> `FKAAC0`/`FKABD1`/`FKACA0`/`FKTAA0`/`FKTBA0`/`FKTCA0`/`FKTDA1`/`FKTFA0` — 34 of 36; `FKTGC0` is
-> skipped (`ignore = 1` in its `.opt` sidecar — it tests console hardware the fake bus does not have,
-> so its result says nothing about the core); one XXDP 11/34 diagnostic in `3_tapes/cpu34/` still
-> fails, on three remaining KT11-D defects: `FKTHB0`, the full memory management diagnostic. There is
-> deliberately no expected-failure mechanism to hide that — `ignore`
-> is only for tapes that are out of scope for the harness, not for known core defects. Full
-> diagnosis in `10.05_cputest/3_tapes/README.md`; use `SKIP_CPUTESTS=1` or `./crossco -n` to build
-> while it is outstanding.
+> **The build is green.** The 26 PDP-11/20 runs (13 tapes × 2 cores) pass, as do the nine XXDP
+> 11/34 diagnostics `FKAAC0`/`FKABD1`/`FKACA0`/`FKTAA0`/`FKTBA0`/`FKTCA0`/`FKTDA1`/`FKTFA0`/`FKTHB0`
+> — 35 of 36; `FKTGC0` is skipped (`ignore = 1` in its `.opt` sidecar — it tests console hardware the
+> fake bus does not have, so its result says nothing about the core). There is deliberately no
+> expected-failure mechanism, so a core defect a tape finds turns the build red until it is fixed —
+> `ignore` is only for tapes that are out of scope for the harness, never for a known defect. Per
+> tape results in `10.05_cputest/3_tapes/README.md`; use `SKIP_CPUTESTS=1` or `./crossco -n` to build
+> without running them.
 
 This is possible because a core (`cpu20/ka11.c`, `cpu34/kd11ea.c` + `cpu34/kt11d.c`) is plain C
 that reaches the outside world **only** through the ten `unibone_*()` functions of

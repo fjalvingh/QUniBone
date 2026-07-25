@@ -283,10 +283,14 @@ $(OBJDIR)/ka11.o :  $(DEVICE_SRC_DIR)/cpu20/ka11.c $(DEVICE_SRC_DIR)/cpu20/ka11.
 $(OBJDIR)/cpu20.o :  $(DEVICE_SRC_DIR)/cpu20.cpp $(DEVICE_SRC_DIR)/cpu20.hpp $(DEVICE_SRC_DIR)/cpu_core.h
 	$(CC) $(CCFLAGS) $< -o $@
 
-$(OBJDIR)/cpu34.o :  $(DEVICE_SRC_DIR)/cpu34.cpp $(DEVICE_SRC_DIR)/cpu34.hpp $(DEVICE_SRC_DIR)/cpu_core.h
+# kt11d.h in both: a KD11EA holds a KT11D by value, and cpu34.cpp allocates the
+# KD11EA, so a change to the MMU struct changes the size that allocation needs.
+# Missing that dependency does not fail to link, it corrupts the heap at run
+# time - same reason as in 10.05_cputest/2_src/makefile.
+$(OBJDIR)/cpu34.o :  $(DEVICE_SRC_DIR)/cpu34.cpp $(DEVICE_SRC_DIR)/cpu34.hpp $(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu34/kd11ea.h $(DEVICE_SRC_DIR)/cpu34/kt11d.h
 	$(CC) $(CCFLAGS) $< -o $@
 
-$(OBJDIR)/kd11ea.o :  $(DEVICE_SRC_DIR)/cpu34/kd11ea.c $(DEVICE_SRC_DIR)/cpu34/kd11ea.h $(DEVICE_SRC_DIR)/cpu_core.h
+$(OBJDIR)/kd11ea.o :  $(DEVICE_SRC_DIR)/cpu34/kd11ea.c $(DEVICE_SRC_DIR)/cpu34/kd11ea.h $(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu34/kt11d.h
 	$(CC) $(CCFLAGS) -x c++ -Wno-parentheses $< -o $@
 
 $(OBJDIR)/kt11d.o :  $(DEVICE_SRC_DIR)/cpu34/kt11d.c $(DEVICE_SRC_DIR)/cpu34/kt11d.h $(DEVICE_SRC_DIR)/cpu_core.h

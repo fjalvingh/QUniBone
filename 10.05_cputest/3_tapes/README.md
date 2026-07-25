@@ -31,18 +31,17 @@ does not, it says what the run is seen to exercise.
 | `cpu34/FKAAC0` | MAINDEC-11-DFKAA-C, "11/34 BSC INST TST" — basic instruction set | — | **PASS** (10888 instructions) |
 | `cpu34/FKABD1` | MAINDEC-11-DFKAB-D, "11/34 TRAPS TST" — trap vectors, trap-within-trap, the kernel stack limit, the reserved instructions, interrupt priority and the WAIT | — | **PASS** (319027 instructions) |
 | `cpu34/FKACA0` | MAINDEC-11-DFKAC-A, no banner — EIS (MUL/DIV/ASH/ASHC) and MFPS/MTPS exerciser | — | **PASS** (4847 instructions) |
-| `cpu34/FKTAA0` | MAINDEC-11-DFKTA-A, "11/34 MEMORY MANAGEMENT LOGIC TEST" — KT11-D registers and relocation | — | **PASS** (15938177 instructions) |
-| `cpu34/FKTBA0` | MAINDEC-11-DFKTB-A, "11/34 MEMORY MANAG. ACCESS KEYS TEST" — PDR access control | — | **PASS** (4573156 instructions) |
+| `cpu34/FKTAA0` | MAINDEC-11-DFKTA-A, "11/34 MEMORY MANAGEMENT LOGIC TEST" — KT11-D registers and relocation | — | **PASS** (13951998 instructions) |
+| `cpu34/FKTBA0` | MAINDEC-11-DFKTB-A, "11/34 MEMORY MANAG. ACCESS KEYS TEST" — PDR access control | — | **PASS** (1818981 instructions) |
 | `cpu34/FKTCA0` | MAINDEC-11-DFKTC-A, no banner — MFPI/MTPI/MFPD/MTPD between the kernel and user spaces | — | **PASS** (758275 instructions) |
 | `cpu34/FKTDA1` | MAINDEC-11-DFKTD-A, no banner — mode protection: HALT and RESET outside kernel mode, previous-mode instructions, device interrupts | — | **PASS** (63805 instructions) |
 | `cpu34/FKTFA0` | MAINDEC-11-DFKTF-A, no banner — MMU aborts and the frozen MMR0/MMR1/MMR2 | — | **PASS** (2931203 instructions) |
 | `cpu34/FKTGC0` | MAINDEC-11-DFKTG-C, no banner — drives the KL11 console itself | — | **SKIP** (`ignore = 1`) |
-| `cpu34/FKTHB0` | MAINDEC-11-DFKTH-B, "11/34 MEMORY MGMT. DIAG." — full KT11-D diagnostic | — | **FAIL** |
+| `cpu34/FKTHB0` | MAINDEC-11-DFKTH-B, "11/34 MEMORY MGMT. DIAG." — full KT11-D diagnostic | — | **PASS** (60038 instructions) |
 
-34 of 36 runs pass, 1 is skipped, **1 fails, so the build is red**. That is
-deliberate: the failure is real defects the tape exists to find, and there is
-no expected-failure mechanism to hide them. `SKIP_CPUTESTS=1` or `./crossco -n`
-builds without running them.
+35 of 36 runs pass, 1 is skipped, **none fail**. There is no expected-failure
+mechanism, so a defect a tape finds turns the build red until it is fixed;
+`SKIP_CPUTESTS=1` or `./crossco -n` builds without running the tests at all.
 
 `FKTGC0` is skipped rather than failed because it tests console hardware the
 fake bus does not have, so its result says nothing about the CPU core: it sends
@@ -52,28 +51,8 @@ transmitter and halts at 003300 after 13 sweeps. Its `.opt` sidecar sets
 is character 007 of its sweep, so this is the one tape whose console traffic is
 data and where a BEL must **not** be read as end of pass.
 
-## FKTHB0 — instruction limit reached at 030104 after 400 M instructions
-
-Not a hang: the tape completes **49 passes** inside the limit, and reports three
-errors on every one of them, so it never prints the BEL that means "end of pass,
-no errors" and the runner only ever sees the limit. It is the broadest of the
-KT11-D tapes, and the only one still failing. Distinct messages, with the number
-of times each was printed over those 49 passes (`SR0`/`SR1`/`SR2` are the tape's
-names for MMR0/MMR1/MMR2):
-
-| times | message | test |
-|---|---|---|
-| 50 | `SR1 DID NOT READ ALL ZEROS` (read 000027, at 022214) | 14 |
-| 50 | `WRITING SR0 SET W-BIT IN KIPDR7` (PDR 077506, expected 077406, at 026252) | 32 |
-| 49 | `SR0 OR SR2 CHANGED BY ODD ADDR. ERROR` (MMR0 000001, expected 000017, at 031530) | 44 |
-
-All three are undiagnosed KT11-D defects: MMR1 keeping a register log it should
-not, a write to MMR0 setting the W bit of a PDR it only names, and an odd
-address error disturbing MMR0. The 13 further messages this tape used to print —
-page length and non-resident aborts not happening, maintenance mode forming
-wrong addresses, MMR0 bits not settable or clearable, MMR2 not tracking or not
-freezing, RESET not clearing MMR0 — are gone with the `FKTFA0` and `FKTAA0`
-rounds of fixes.
+`FKTHB0` is judged on its text and not on a BEL, and the text it is judged on
+reaches into a number — see [How a run is judged](#how-a-run-is-judged) below.
 
 ## A tape needs different settings?
 
@@ -113,10 +92,21 @@ report an error by halting, so the first such line, reached without a halt, is a
 clean pass. `cpu34/FKABD1.BIC` is judged the same way, on the `DONE` of the
 `CFKABD1 11/34 TRAPS TST DONE` it prints per pass.
 
+`cpu34/FKTHB0.BIC` announces the end of a pass in words too, but it does not
+halt on an error — it prints the failed tests and carries on to
+
+```
+END PASS #     1  TOTAL ERRORS SINCE LAST REPORT      0
+```
+
+so "end of pass" and "no errors" are on the same line and only the two together
+are a pass. Its `pass-text` therefore reaches into the error count rather than
+stopping at `END PASS`, which on its own would pass the tape while it was still
+printing failures. A count of ten or more reads `     10` and does not match.
+
 On failure the run is replayed with tracing on to show the instructions leading
-up to it, followed by a dump of the CPU and MMU state; that replay is what the
-diagnoses above are built from. It is exact, because the fake bus is fully
-deterministic. To reproduce one by hand:
+up to it, followed by a dump of the CPU and MMU state. It is exact, because the
+fake bus is fully deterministic. To reproduce one by hand:
 
 ```bash
 10.05_cputest/4_deploy/cputest --core cpu34 \

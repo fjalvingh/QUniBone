@@ -68,6 +68,28 @@ enum {
 /* trap vector of a memory management abort */
 #define KT11D_ABORT_VECTOR	0250
 
+/* Does this 18 bit physical address name one of the KT11-D's own registers?
+
+ This is the gate in front of the register decode in kt11d.c - lookup() answers
+ nil for anything this rejects - and it is also what keeps such a reference from
+ setting the W bit of the page it is addressed through: the KT11-D sits inside
+ the KD11-EA, so a reference to one of its registers is answered internally and
+ never becomes a DATO on the QUNIBUS. Nothing was written into the page, and the
+ hardware does not pretend otherwise. MAINDEC DFKTH-B tests exactly that, as
+ "WRITING SR0 SET W-BIT IN KIPDR7": MMR0 is reached through kernel page 7, and
+ writing it must leave KIPDR7 alone. */
+static inline int
+kt11d_is_own_register(uint32 pa)
+{
+	if(pa < 0772300)					// all of memory: the common case
+		return 0;
+	return (pa <= 0772317)					// kernel PDR 772300..772316
+		|| (pa >= 0772340 && pa <= 0772357)	// kernel PAR 772340..772356
+		|| (pa >= 0777572 && pa <= 0777577)	// MMR0..MMR2 777572..777576
+		|| (pa >= 0777600 && pa <= 0777617)	// user PDR   777600..777616
+		|| (pa >= 0777640 && pa <= 0777657);	// user PAR   777640..777656
+}
+
 /* Precomputed form of one PAR/PDR pair, rebuilt whenever the pair is written.
  The layout keeps sizeof() a power of 2, so indexing the array needs no
  multiplication - same reason as for pru_iopage_register_t in iopageregister.h.
@@ -164,6 +186,17 @@ kt11d_relocate(KT11D *mmu, word va, unsigned space, unsigned access, uint32 *pa)
 	}
 	if(mmu->access_illegal)
 		return kt11d_abort_mode(mmu, va);
+	// MMR0<6:1> is not a record of the last abort but of the last relocated
+	// reference of any kind: the hardware keeps loading the mode and the page
+	// it was made in until an abort freezes them. MAINDEC DFKTH-B reads MMR0
+	// after an odd address trap and expects <3:1> to name page 7 - the page
+	// MMR0 itself was just read through - as "SR0 OR SR2 CHANGED BY ODD ADDR.
+	// ERROR". kt11d_abort() writes the same two fields again, together with
+	// the abort bits which are what actually freezes them.
+	if(!mmu->frozen)
+		mmu->mmr0 = (mmu->mmr0 & ~(KT11D_MMR0_MODE|KT11D_MMR0_PAGE))
+				| (mmu->access_mode << 5)
+				| ((va >> 13) << 1);
 	p = &mmu->page[space + (va >> 13)];
 	blk = (va >> 6) & 0177;
 	// One unsigned compare covers both expansion directions: for a page which
@@ -172,10 +205,12 @@ kt11d_relocate(KT11D *mmu, word va, unsigned space, unsigned access, uint32 *pa)
 		return kt11d_abort(mmu, va, space, access);
 	if((unsigned)(blk - p->blk_lo) > p->blk_span)
 		return kt11d_abort(mmu, va, space, access);
-	if(access & KT11D_WRITE)
+	*pa = (p->base + va) & 0777777;
+	// A write to a KT11-D register is answered inside the KD11-EA and never
+	// reaches the page - see kt11d_is_own_register().
+	if((access & KT11D_WRITE) && !kt11d_is_own_register(*pa))
 		mmu->pdr[p->pdr_idx] |= KT11D_PDR_W;	// only touches the raw PDR,
 												// page[] does not depend on W
-	*pa = (p->base + va) & 0777777;
 	return 0;
 }
 
@@ -209,12 +244,21 @@ kt11d_instruction_fetched(KT11D *mmu, word pc)
 }
 
 /* log an autoincrement/autodecrement of a register into MMR1.
- Format per byte: <7:3> = amount added, 2's complement, <2:0> = register. */
+ Format per byte: <7:3> = amount added, 2's complement, <2:0> = register.
+
+ The PC is not logged. MMR1 exists so that an abort handler can undo the
+ register changes of the instruction it has to restart, and the PC is not its
+ business: the aborted instruction is re-entered from MMR2 and from the PC on
+ the stack, and backing it out here as well would move it twice. So the PC
+ autoincrement of an immediate or absolute operand leaves MMR1 empty, which is
+ what MAINDEC DFKTH-B checks with a `MOV @#177574,R0` reading its own MMR1:
+ "SR1 DID NOT READ ALL ZEROS". Index mode never gets here to begin with -
+ addrop() advances the PC over the index word without calling this. */
 static inline void
 kt11d_log_register(KT11D *mmu, unsigned reg, int amount)
 {
 	word entry;
-	if(mmu->frozen || mmu->mmr1_count >= 2)
+	if(mmu->frozen || reg == 7 || mmu->mmr1_count >= 2)
 		return;
 	entry = ((amount & 037) << 3) | (reg & 7);
 	if(mmu->mmr1_count == 0)

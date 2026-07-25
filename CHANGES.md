@@ -70,12 +70,11 @@ tests `FKAAC0`, `FKABD1`, `FKACA0` and the KT11-D memory management tests `FKTAA
 `FKTCA0`, `FKTDA1`, `FKTFA0`, `FKTGC0`, `FKTHB0`. These close the coverage gap left by the ZKA\* set,
 which predates the 11/34 and exercises nothing of EIS, MFPS/MTPS or the MMU.
 
-**Status: the build is red, deliberately**
+**Status: green.** All 26 PDP-11/20 runs pass, and so do all nine 11/34 tapes that are in scope;
+`FKTGC0` is skipped because it drives console hardware the fake bus does not have.
 
-All 26 PDP-11/20 runs still pass. 11/34 tests still fail, and we are fixing these one by one.
-
-No expected-failure mechanism was added — the failures are
-meant to stay visible. `SKIP_CPUTESTS=1` or `./crossco -n` builds without them.
+No expected-failure mechanism was added — a defect a tape finds is meant to stay visible and turn
+the build red until it is fixed. `SKIP_CPUTESTS=1` or `./crossco -n` builds without them.
 
 **Verified**: cross-compile only, no hardware run. 26 of 36 runs pass; the ten failures above are
 reproduced from a clean build. Confirmed the byte-wise loader rewrite did not disturb the 11/20

@@ -12,6 +12,47 @@ contract to the QUNIBUS adapter is `../cpu_bus_adapter.h`.
 
 ## Unreleased
 
+### KT11-D: what MMR0 and MMR1 record, and what a write to the MMU's own registers does, found by FKTHB0
+
+`FKTHB0`, the full memory management diagnostic and the broadest of the KT11-D tapes, reported three
+errors on every pass and so never announced a clean one. Three defects, all in the bookkeeping the
+MMU does *beside* the translation; the tape now runs clean and the suite is green again.
+
+- **MMR0<6:1> only recorded aborts.** Bits 6-1 do not describe the last abort but the last relocated
+  reference of any kind: the hardware keeps loading the mode and the page it was made in until an
+  abort freezes them. Ours were written by `kt11d_abort()` alone, so between aborts they said
+  nothing. The tape provokes an odd address trap — a CPU trap, not an MMU abort, so nothing is
+  frozen — and then reads MMR0 through kernel page 7, expecting 000017: page 7, because reading MMR0
+  *is* the most recent reference. It got 000001 and reported "SR0 OR SR2 CHANGED BY ODD ADDR.
+  ERROR". `kt11d_relocate()` now loads the two fields on every reference it relocates, unless frozen;
+  `kt11d_abort()` still writes them together with the abort bits, which are what does the freezing.
+  Nothing changes while relocation is off, because the hot path returns before this.
+- **A write to a KT11-D register set the W bit of the page it lies in.** The MMU registers are
+  reached through kernel page 7 like anything else in the I/O page, and `kt11d_relocate()` set
+  PDR<6> for every write it translated — so `MOV R0,@#177572`, a write to MMR0, marked KIPDR7 as
+  written into ("WRITING SR0 SET W-BIT IN KIPDR7", 077506 for the expected 077406). But the KT11-D
+  sits inside the KD11-EA: a reference to one of its registers is answered internally and never
+  becomes a DATO on the page, so nothing was written into it. The new `kt11d_is_own_register()` says
+  which physical addresses those are, and the W bit is now set only for a write which is not one of
+  them. The same predicate is the gate in front of `lookup()` in `kt11d.c`, so the two decodes cannot
+  drift apart — an address this rejects has no register behind it either.
+- **MMR1 logged autoincrements of the PC.** MMR1 exists so that an abort handler can undo the
+  register changes of the instruction it has to restart, and the PC is not its business: the aborted
+  instruction is re-entered from MMR2 and from the PC on the stack, and backing it out here as well
+  would move it twice. `kt11d_log_register()` logged R7 all the same, so an absolute-mode operand
+  logged its own PC autoincrement — which the tape reads straight back with a `MOV @#177574,R0`,
+  getting 000027 where it wants MMR1 empty ("SR1 DID NOT READ ALL ZEROS"). It now ignores R7. Index
+  mode never reached it to begin with: `addrop()` advances the PC over the index word without
+  logging.
+
+`FKTHB0` neither rings the bell at the end of a pass nor halts on an error — it prints its errors and
+then one `END PASS # n TOTAL ERRORS SINCE LAST REPORT n` line — so it needed a `pass-text` sidecar
+like `FKAAC0` and `FKABD1`. The text reaches into the error count, because `END PASS` alone would
+have passed the tape while it was still printing failures.
+
+Verified: the full cputest run — 35 of 36 runs pass, 1 (`FKTGC0`) is skipped, none fail. Not run on
+real hardware.
+
 ### KT11-D: maintenance mode, RESET and the modes which do not exist, found by FKTAA0
 
 `FKTAA0`, the memory management logic tape, halted after 4522485 instructions. Three defects in the

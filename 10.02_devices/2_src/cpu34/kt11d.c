@@ -206,6 +206,12 @@ lookup(KT11D *mmu, uint32 pa, unsigned *idx, int *writable_mask)
 {
 	unsigned i;
 
+	// the same predicate the hot path uses to keep a write to one of these
+	// from setting the W bit of the page it lies in: whether an address is a
+	// register of ours is decided in one place only.
+	if(!kt11d_is_own_register(pa))
+		return nil;
+
 	switch(pa){
 	case 0777572:
 		*idx = ~0u;
