@@ -71,6 +71,11 @@ void testbus_c::console_put(uint8_t c)
     // nothing else of interest, and only a failing run's output is worth seeing.
     if (c != 0)
         console_output.push_back((char) c);
+    // a tape which announces the end of a pass in text has just done so?
+    if (!pass_text.empty() && console_output.size() >= pass_text.size()
+            && console_output.compare(console_output.size() - pass_text.size(), pass_text.size(),
+                                      pass_text) == 0)
+        pass_text_seen = true;
 }
 
 /*** the I/O page ***/

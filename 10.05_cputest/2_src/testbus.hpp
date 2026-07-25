@@ -78,6 +78,14 @@ public:
 
     // a BEL was printed: the diagnostic completed a pass without errors
     bool bell = false;
+    // End of pass announced in text instead of with a BEL, as the 11/34 basic
+    // instruction tapes do ("END PASS 1"). Empty: no such text is looked for.
+    // Set from the "pass-text" option, see cputest.cpp.
+    std::string pass_text;
+    // pass_text has just been printed
+    bool pass_text_seen = false;
+    // the run is over and the diagnostic completed a pass without errors
+    bool passed(void) const { return bell || pass_text_seen; }
     // Is a BEL the end-of-pass signal? True for every MAINDEC, but a tape which
     // exercises the console itself sends the whole character set as data, BEL
     // included, and would be judged passed on its seventh character. Such a tape

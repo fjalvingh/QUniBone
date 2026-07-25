@@ -4,6 +4,43 @@ Notable changes to QUniBone, newest first.
 
 ## Unreleased
 
+### FKAAC0 and FKACA0 pass: five KD11-EA defects, and a text pass criterion
+
+`FKAAC0`, the 11/34 basic instruction test, halted after 2206 instructions on the defect the tape
+README named — a register source read *after* the destination had autoincremented it. Fixing that
+uncovered the next defect each time, five in a row, and the tape then ran clean but could still not
+be judged: like `FKACA0` it announces the end of a pass in text, not with a BEL, so the runner rang
+up the instruction limit. Both tapes now pass.
+
+**Changed — the CPU core**
+
+- `10.02_devices/2_src/cpu34/kd11ea.c` — operand evaluation order (source strictly before
+  destination, in `RD_B`/`RD_U`); `JMP`/`JSR` in autoincrement mode jump to the effective address
+  instead of the incremented register; `SXT` and `MARK` implemented, both of which trapped as
+  reserved instructions; the T bit is no longer settable by `MTPS` or by a bus write to 777776, only
+  by `RTI`/`RTT`. Full diagnosis in `10.02_devices/2_src/cpu34/CHANGES.md`.
+- `10.02_devices/2_src/cpu20/ka11.c` — **unchanged**, deliberately. The 11/20 core reads the same
+  way but is a different machine: whether a register source sees the destination's autoincrement or
+  autodecrement is a documented family difference (*PDP-11 Architecture Handbook* 1983, appendix B —
+  the 15/20 modifies the register first, the 34 does not), the KA11 has neither `SXT` nor `MARK`,
+  and its `JMP`/`JSR` use the incremented register on purpose.
+
+**Changed — the test harness**
+
+- `10.05_cputest/2_src/cputest.cpp`, `testbus.cpp`, `testbus.hpp` — new `pass-text` option
+  (`--pass-text` / `.opt` sidecar key): a run passes when the KL11 has printed that string, for a
+  tape which announces the end of a pass in words instead of with a BEL. Sidecar values now run to
+  the end of the line, so they may contain blanks.
+- `10.05_cputest/3_tapes/cpu34/FKAAC0.BIC.opt`, `FKACA0.BIC.opt` — new, both `pass-text = END PASS`.
+- `10.05_cputest/3_tapes/README.md` — both tapes moved to the passing set, their failure sections
+  dropped, `pass-text` documented.
+
+**Verified**: on the host, `10.05_cputest`, 36 runs: 31 pass (the 26 PDP-11/20 runs, `FKAAC0`,
+`FKACA0`, `FKTBA0`, `FKTCA0`, `FKTDA1`), `FKTGC0` is skipped, and 4 still fail — `FKABD1`,
+`FKTAA0`, `FKTFA0`, `FKTHB0`, unchanged except that `FKTHB0` now reaches the instruction limit at a
+different PC. The ARM `demo` cross-compiles and links. No hardware run: `cpu.cpp` and the PRUs are
+untouched.
+
 ### MFPS with a register destination no longer aborts the emulator
 
 `FKTHB0` killed the process outright — `Assertion '0' failed` in `addrop()` of `kd11ea.c`, no `FAIL`

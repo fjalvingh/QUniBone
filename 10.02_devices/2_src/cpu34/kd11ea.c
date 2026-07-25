@@ -275,6 +275,9 @@ trace("%s [%06o] <= %06o\n", b? "DATOB":"DATO", cpu->ba, cpu->bus->data);
 			// and PSW<7:5>, which the arbitrator has to be told about.
 			// DATOB writes only the addressed half; mask has it already.
 			// The non-existent bits are dropped by kd11ea_set_psw().
+			// T is not writable this way, no more than by MTPS: only
+			// RTI/RTT can set it.
+			mask &= ~PSW_T;
 			kd11ea_set_psw(cpu, (cpu->psw & ~mask) |
 					(cpu->bus->data & mask));
 			goto ok;
@@ -441,12 +444,22 @@ step(KD11EA *cpu)
 #define BA	cpu->ba
 #define PSW	cpu->psw
 
-#define RD_B	if(sm != 0) if(readop(cpu, 010, src, by)) goto be;\
-		if(dm != 0) if(readop(cpu, 011, dst, by)) goto be;\
-		if(sm == 0) fetchop(cpu, 010, src, by);\
-		if(dm == 0) fetchop(cpu, 011, dst, by)
-#define RD_U	if(dm != 0) if(readop(cpu, 011, dst, by)) goto be;\
+// Source strictly before destination: with `MOV R0,(R0)+` the source must be
+// the value R0 had before the destination autoincremented it. A register
+// operand goes through fetchop() alone, never readop(), so that addrop() does
+// not overwrite cpu->ba - after the destination has been evaluated ba must
+// still address it for writedest().
+// Do not copy this into ka11.c: whether the destination's autoincrement or
+// autodecrement is seen by a register source is a documented family difference
+// (PDP-11 Architecture Handbook 1983, appendix B). The 11/34 is among the
+// machines that do *not* modify the register first, the 11/20 among those that
+// do, so the 11/20 core keeps evaluating the destination first.
+#define RD_B	if(sm == 0) fetchop(cpu, 010, src, by);\
+		else if(readop(cpu, 010, src, by)) goto be;\
 		if(dm == 0) fetchop(cpu, 011, dst, by);\
+		else if(readop(cpu, 011, dst, by)) goto be
+#define RD_U	if(dm == 0) fetchop(cpu, 011, dst, by);\
+		else if(readop(cpu, 011, dst, by)) goto be;\
 		SR = DR
 #define WR	if(writedest(cpu, b, by)) goto be
 #define NZ	setnz(cpu, b)
@@ -822,14 +835,23 @@ step(KD11EA *cpu)
 		WR; SVC;
 
 	case 0006400:
-		// mtps. Only the byte form 106400 is MTPS, 006400 is MARK
-		if(!by)
-			goto ri;
+		// Only the byte form 106400 is MTPS, 006400 is MARK
+		if(!by){
+			TR(MARK);
+			// pop the NN argument words the caller pushed, return to the
+			// address in R5 and restore R5 from the stack. PC already points
+			// past the MARK. Condition codes are not affected.
+			SP = PC + 2*(cpu->ir & 077);
+			PC = cpu->r[5];
+			BA = SP; POP; IN(cpu->r[5]);
+			SVC;
+		}
 		TR(MTPS);
 		RD_U;
 		// changes PSW<7:5>, so the arbitrator has to be told: go through
-		// kd11ea_set_psw(). The mode bits are not affected.
-		kd11ea_set_psw(cpu, (cpu->psw & 0xff00) | (DR & 0377));
+		// kd11ea_set_psw(). The mode bits are not affected, and neither is
+		// the T bit - MTPS cannot set it.
+		kd11ea_set_psw(cpu, (cpu->psw & (0xff00|PSW_T)) | (DR & (0377 & ~PSW_T)));
 		SVC;
 
 	/* MFPI/MTPI address in the current mode but transfer in the previous
@@ -875,9 +897,22 @@ step(KD11EA *cpu)
 		SVC;
 
 	case 0006700:
-		// mfps. Only the byte form 106700 is MFPS, 006700 is SXT
-		if(!by)
-			goto ri;
+		// Only the byte form 106700 is MFPS, 006700 is SXT
+		if(!by){
+			TR(SXT);
+			if(dm != 0)
+				if(addrop(cpu, dst, 0)) goto be;
+			// -1 if N is set, 0 if it is clear. setnz() then leaves N as it
+			// was and sets Z exactly when N is clear, which is the rule; C is
+			// not affected.
+			b = ISSET(PSW_N) ? 0177777 : 0;
+			CLV; NZ;
+			if(dm == 0)
+				cpu->r[df] = b;
+			else
+				WR;
+			SVC;
+		}
 		TR(MFPS);
 		// mode 0 is the register itself: addrop() computes an address and
 		// starts at mode 1, so it must not be called for it. A byte
@@ -900,7 +935,7 @@ step(KD11EA *cpu)
 	case 0004400:	TR(JSR);
 		if(dm == 0) goto ill;
 		if(addrop(cpu, dst, 0)) goto be;
-		DR = cpu->b;
+		DR = cpu->ba;
 		PUSH; OUT(SP, cpu->r[sf]);
 		cpu->r[sf] = PC; PC = DR;
 		SVC;
@@ -935,7 +970,7 @@ step(KD11EA *cpu)
 	case 0100:	TR(JMP);
 		if(dm == 0) goto ill;
 		if(addrop(cpu, dst, 0)) goto be;
-		PC = cpu->b;
+		PC = cpu->ba;
 		SVC;
 	case 0200:
         switch(cpu->ir&070){

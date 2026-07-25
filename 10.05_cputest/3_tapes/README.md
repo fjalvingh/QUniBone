@@ -28,9 +28,9 @@ does not, it says what the run is seen to exercise.
 | tape | what it tests | cpu20 | cpu34 |
 |---|---|---|---|
 | `ZKAAA0` … `ZKAMA0` (13 tapes) | MAINDEC-11-DZKAA … DZKAM, the PDP-11/20 instruction set tests. No banner text; vendored with the 11/20 core | **PASS** (13/13) | **PASS** (13/13) |
-| `cpu34/FKAAC0` | MAINDEC-11-DFKAA-C, "11/34 BSC INST TST" — basic instruction set | — | **FAIL** |
+| `cpu34/FKAAC0` | MAINDEC-11-DFKAA-C, "11/34 BSC INST TST" — basic instruction set | — | **PASS** (10552 instructions) |
 | `cpu34/FKABD1` | MAINDEC-11-DFKAB-D, "11/34 TRAPS TST" — trap vectors, trap-within-trap, the kernel stack limit | — | **FAIL** |
-| `cpu34/FKACA0` | MAINDEC-11-DFKAC-A, no banner — EIS (MUL/DIV/ASH/ASHC) and MFPS/MTPS exerciser | — | **FAIL** (harness, not the core) |
+| `cpu34/FKACA0` | MAINDEC-11-DFKAC-A, no banner — EIS (MUL/DIV/ASH/ASHC) and MFPS/MTPS exerciser | — | **PASS** (4847 instructions) |
 | `cpu34/FKTAA0` | MAINDEC-11-DFKTA-A, "11/34 MEMORY MANAGEMENT LOGIC TEST" — KT11-D registers and relocation | — | **FAIL** |
 | `cpu34/FKTBA0` | MAINDEC-11-DFKTB-A, "11/34 MEMORY MANAG. ACCESS KEYS TEST" — PDR access control | — | **PASS** (4032661 instructions) |
 | `cpu34/FKTCA0` | MAINDEC-11-DFKTC-A, no banner — MFPI/MTPI/MFPD/MTPD between the kernel and user spaces | — | **PASS** (758275 instructions) |
@@ -39,7 +39,7 @@ does not, it says what the run is seen to exercise.
 | `cpu34/FKTGC0` | MAINDEC-11-DFKTG-C, no banner — drives the KL11 console itself | — | **SKIP** (`ignore = 1`) |
 | `cpu34/FKTHB0` | MAINDEC-11-DFKTH-B, "11/34 MEMORY MGMT. DIAG." — full KT11-D diagnostic | — | **FAIL** |
 
-29 of 36 runs pass, 1 is skipped, **6 fail, so the build is red**. That is
+31 of 36 runs pass, 1 is skipped, **4 fail, so the build is red**. That is
 deliberate: the failures are real defects the tapes exist to find, and there is
 no expected-failure mechanism to hide them. `SKIP_CPUTESTS=1` or `./crossco -n`
 builds without running them.
@@ -51,34 +51,6 @@ transmitter and halts at 003300 after 13 sweeps. Its `.opt` sidecar sets
 `ignore = 1`, and keeps `bell-is-pass = 0` for whenever it is re-enabled — a BEL
 is character 007 of its sweep, so this is the one tape whose console traffic is
 data and where a BEL must **not** be read as end of pass.
-
-## FKAAC0 — halt at 012132 after 2206 instructions
-
-A register source is read after the destination has been autoincremented.
-
-At 012112 the tape executes `010020` = `MOV R0,(R0)+` with `R0` = 0 and location
-0 = 177777:
-
-```
-012104  005000         CLR R0
-012106  005010         CLR (R0)
-012110  005110         COM (R0)         ; location 0 := 177777
-012112  010020         MOV R0,(R0)+     ; expected: store 000000, R0 -> 2, Z set
-012114  100402         BMI 012122       ; N must be clear
-012116  102401         BVS 012122       ; V must be clear
-012120  001404         BEQ 012132       ; Z must be set   <-- not taken
-012122  012742 000304  MOV #304,-(R2)   ; error report
-012126  005242         INC -(R2)
-012130  000000         HALT
-```
-
-The core writes **000002** to location 0 and leaves Z clear, so the `BEQ` falls
-into the error report and the HALT at 012130 (the runner reports the PC after
-it, 012132). The dump confirms it: `R0 000002`.
-
-`RD_B` in `kd11ea.c` reads memory-mode operands first and register-mode operands
-afterwards, so a register source is fetched *after* the destination's
-autoincrement has already updated that same register.
 
 ## FKABD1 — double bus error, halt at 000006 after 3480 instructions
 
@@ -112,21 +84,6 @@ more words, walking the stack down through 0 into the I/O page (it overwrites
 the MMU registers on the way — hence `MMR0 140017` in the dump, and
 `R6 177570`), until a push itself bus-errors and the harness reports a double
 bus error.
-
-## FKACA0 — instruction limit reached, no core defect seen
-
-This one is a harness limitation, not a KD11-EA failure. The tape signals end of
-pass **in text**, not with a BEL, so the runner's pass criterion never fires and
-the run ends on the instruction limit (400 M by default, at PC 004174).
-
-Run long, it keeps passing cleanly: in 300 M instructions it prints `END PASS`
-255 times (about 1.2 M instructions per pass) and nothing else, never halts and
-never reports an error. 1.5 G instructions behave the same way.
-
-Judging it needs a rule other than the BEL — the tape's console output has to be
-matched, or the pass has to be recognized some other way. Until then it is
-counted as a failure rather than hidden with `ignore = 1`, because the tape does
-run and does exercise the EIS instructions and MFPS.
 
 ## FKTAA0 — halt at 003060 after 4522029 instructions
 
@@ -219,11 +176,12 @@ maxsteps  = 800000000
 ```
 
 Recognized keys are `maxsteps`, `ram-words`, `sw` (octal), `tracelines`,
-`bell-is-pass` and `ignore` — the long forms of the `cputest` options, without
-the leading dashes. `ignore = 1` skips the tape entirely: the runner prints a
-`SKIP` line and exits 0, for a tape that is out of scope for this harness
-(e.g. one testing hardware the fake bus does not have) rather than one finding
-a real core defect. Run `4_deploy/cputest --help` for the defaults.
+`bell-is-pass`, `pass-text` and `ignore` — the long forms of the `cputest`
+options, without the leading dashes. A value runs to the end of the line, so
+`pass-text` may contain blanks. `ignore = 1` skips the tape entirely: the runner
+prints a `SKIP` line and exits 0, for a tape that is out of scope for this
+harness (e.g. one testing hardware the fake bus does not have) rather than one
+finding a real core defect. Run `4_deploy/cputest --help` for the defaults.
 
 ## How a run is judged
 
@@ -235,9 +193,14 @@ That rule only holds for a tape which uses the console to talk to the operator.
 One which exercises the KL11 as a device sends the whole character set as test
 data, BEL included, and would be judged passed on its seventh character. Such a
 tape sets `bell-is-pass = 0` in its `.opt` sidecar and has to be judged some
-other way; `cpu34/FKTGC0.BIC` is the one example here. A tape which ends a pass
-in text instead of with a BEL cannot be judged by the rule either — see
-`FKACA0` above.
+other way; `cpu34/FKTGC0.BIC` is the one example here.
+
+A tape which announces the end of a pass in words instead of with a BEL is
+judged on that text: `pass-text = END PASS` in its sidecar passes the run as
+soon as the KL11 has printed that string. `cpu34/FKAAC0.BIC` and
+`cpu34/FKACA0.BIC` both do this — they print `END PASS 1`, `END PASS 2`, … and
+report an error by halting, so the first such line, reached without a halt, is a
+clean pass.
 
 On failure the run is replayed with tracing on to show the instructions leading
 up to it, followed by a dump of the CPU and MMU state; that replay is what the

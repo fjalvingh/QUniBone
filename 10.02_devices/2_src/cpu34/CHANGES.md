@@ -10,6 +10,48 @@ contract to the QUNIBUS adapter is `../cpu_bus_adapter.h`.
 
 ## Unreleased
 
+### The basic instruction set: five defects found by FKAAC0
+
+`FKAAC0`, the 11/34 basic instruction test, halted after 2206 instructions. Fixing what it reported
+uncovered the next defect each time, five in a row, all in `kd11ea.c`. The tape now runs clean.
+
+- **Operand evaluation order.** The `RD_B`/`RD_U` macros evaluated *memory* operands first and
+  *register* operands afterwards, so `MOV R0,(R0)+` fetched the source after the destination had
+  already autoincremented that same register: it stored 000002 where the tape expects 000000. The
+  order is now source strictly before destination. What the old order was working around is that
+  `addrop()` overwrites `cpu->ba`, which after the destination has been evaluated must still address
+  it for `writedest()`; a register operand therefore goes through `fetchop()` alone, never
+  `readop()`, and never touches `ba`. Also the order in which `MMR1` records the two register
+  changes, which is what an abort handler undoes.
+  This one is **not** to be copied into `cpu20/ka11.c`, where the same macros read the same way:
+  whether a register source sees the destination's autoincrement/autodecrement is a documented
+  family difference. *PDP-11 Architecture Handbook* (1983), appendix B "PDP-11 Family Differences":
+  the 23/24, 15/20, 25/40, 60, J-11 and T-11 modify the register before using it as the source, the
+  04, 05/10, 34, 44, 45, 70, LSI-11 and VAX do not. The KD11-EA belongs to the second group - which
+  is what `FKAAC0` tests - and the KA11 to the first, so the 11/20 core keeps its order.
+- **`JMP`/`JSR` in mode 2.** Both jumped to `cpu->b`, which for autoincrement is the register value
+  *after* the increment: `MOV #15536,R0` / `JMP (R0)+` landed at 015540 instead of 015536. They now
+  use the effective address `cpu->ba`. The two are the only readers of the `b` field, and `b`
+  differs from `ba` only in this one mode.
+- **`SXT` (0067DD) was not implemented** and trapped as a reserved instruction — the word form of
+  the opcode whose byte form is `MFPS`, just as `MARK` is the word form of `MTPS`. Destination gets
+  -1 if N is set and 0 if it is clear; `setnz()` then leaves N as it was and sets Z exactly when N is
+  clear, which is the rule, and C is not affected.
+- **`MARK` (0064NN) was not implemented** either, same trap. `SP <- PC + 2*NN; PC <- R5;
+  R5 <- (SP)+`, condition codes untouched.
+- **The T bit was writable.** `MTPS` and a bus write to 777776 both set PSW<4>, so the tape got a
+  trace trap through vector 14 where it expects none, and read its PSW back as 000377 instead of
+  000357. Only `RTI`/`RTT` can set T; an explicit write now leaves it alone.
+
+None of the five is carried over to `cpu20/ka11.c`; all five are 11/34 behaviour that the 11/20
+either differs in or does not have. The operand order is the family difference above. The 11/20 has
+neither `SXT` nor `MARK`. Its `JMP`/`JSR` keep reading `cpu->b`, the incremented register — that is
+what the field was introduced for ("B register before BUT JSRJMP" in `ka11.h`), i.e. deliberate KA11
+behaviour. And its PSW is written straight through in `ka11.c` `dato()`, with no MTPS to protect
+against. The 13 `ZKA*` tapes decide none of it: they pass on both cores, and none of them ever
+executes a double operand instruction with a register source and the same register as an
+autoincrement/autodecrement destination (checked by instrumenting `step()` for all 13 runs).
+
 ### KT11-D memory management
 
 The core was a fork of the 11/20 KA11 and had no memory management, which limited the emulated 11/34

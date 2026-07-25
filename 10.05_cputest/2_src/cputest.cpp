@@ -24,6 +24,7 @@
  A run: load the paper tape at 0, start at 0200, step until
 
 	- the diagnostic prints a BEL		-> it completed a pass with no errors: PASS
+	  (or the text of "pass-text", for a tape which announces that in words)
 	- the CPU halts				-> a MAINDEC reports errors by halting: FAIL
 	- the instruction limit is reached	-> hung, or looping without ever
 						   finishing a pass: FAIL
@@ -59,6 +60,9 @@ struct options_t {
     uint64_t tracelines = 500;
     // is a BEL on the console the end-of-pass signal? See testbus_c::bell_is_pass.
     bool bell_is_pass = true;
+    // console text which ends a pass, for a tape which does not ring the bell.
+    // See testbus_c::pass_text.
+    std::string pass_text;
     // do not run the tape at all: report SKIP and exit 0. For a tape that is
     // out of scope for this harness, e.g. one testing hardware the fake bus
     // does not have.
@@ -77,6 +81,8 @@ static void usage(const char *argv0)
     fprintf(stderr, "  --tracelines <n>    instructions to trace before a failure (0 = none)\n");
     fprintf(stderr, "  --bell-is-pass <n>  1 = a BEL on the console ends a pass (default), 0 = not:\n");
     fprintf(stderr, "                      for a tape which sends the character set as test data\n");
+    fprintf(stderr, "  --pass-text <text>  console text which ends a pass, for a tape which\n");
+    fprintf(stderr, "                      announces it in words instead of with a BEL\n");
     fprintf(stderr, "  --ignore <n>        1 = do not run the tape: report SKIP, exit 0.\n");
     fprintf(stderr, "                      For a tape testing hardware the fake bus does not have\n");
     fprintf(stderr, "\n");
@@ -103,13 +109,19 @@ static std::string read_tape_options(const char *tapepath, options_t &opt)
             s++;
         if (*s == '#' || *s == '\n' || *s == '\r' || *s == 0)
             continue;
+        // The value is the rest of the line, trimmed: "pass-text" may contain
+        // blanks. The numeric conversions below stop at the first blank anyway.
         char key[64], value[128];
-        if (sscanf(s, "%63[^= \t] %*[= \t] %127s", key, value) != 2) {
+        if (sscanf(s, "%63[^= \t] %*[= \t] %127[^\n\r]", key, value) != 2) {
             char buff[256];
             sprintf(buff, "%s(%u): expected \"key = value\"", path.c_str(), linenr);
             error = buff;
             break;
         }
+        size_t end = strlen(value);
+        while (end > 0 && (value[end - 1] == ' ' || value[end - 1] == '\t'))
+            value[--end] = 0;
+
         if (!strcmp(key, "maxsteps"))
             opt.maxsteps = strtoull(value, nullptr, 0);
         else if (!strcmp(key, "ram-words"))
@@ -120,6 +132,8 @@ static std::string read_tape_options(const char *tapepath, options_t &opt)
             opt.tracelines = strtoull(value, nullptr, 0);
         else if (!strcmp(key, "bell-is-pass"))
             opt.bell_is_pass = strtoul(value, nullptr, 0) != 0;
+        else if (!strcmp(key, "pass-text"))
+            opt.pass_text = value;
         else if (!strcmp(key, "ignore"))
             opt.ignore = strtoul(value, nullptr, 0) != 0;
         else {
@@ -134,7 +148,7 @@ static std::string read_tape_options(const char *tapepath, options_t &opt)
 }
 
 enum result_e {
-    result_passed,	// BEL: end of pass, no errors
+    result_passed,	// BEL, or the pass-text: end of pass, no errors
     result_halted,	// MAINDECs report an error by halting
     result_hung		// instruction limit reached
 };
@@ -147,13 +161,14 @@ static result_e run(testcore_c *core, testbus_c &bus, const options_t &opt, uint
 {
     bus.install(core);
     bus.bell_is_pass = opt.bell_is_pass;
+    bus.pass_text = opt.pass_text;
     core->power_reset();
     core->set_switches(opt.switches);
     core->set_pc(start_pc);
     core->set_state(testcore_c::state_running);
 
     uint64_t n = 0;
-    while (core->get_state() != testcore_c::state_halted && !bus.bell && n < opt.maxsteps) {
+    while (core->get_state() != testcore_c::state_halted && !bus.passed() && n < opt.maxsteps) {
         if (n == trace_from)
             bus.tracing = true;
         core->condstep();
@@ -162,7 +177,7 @@ static result_e run(testcore_c *core, testbus_c &bus, const options_t &opt, uint
     bus.tracing = false;
     *steps = n;
 
-    if (bus.bell)
+    if (bus.passed())
         return result_passed;
     if (core->get_state() == testcore_c::state_halted)
         return result_halted;
@@ -196,6 +211,8 @@ int main(int argc, char **argv)
             opt.tracelines = strtoull(v, nullptr, 0), i++;
         } else if (!strcmp(a, "--bell-is-pass")) {
             opt.bell_is_pass = strtoul(v, nullptr, 0) != 0, i++;
+        } else if (!strcmp(a, "--pass-text")) {
+            opt.pass_text = v, i++;
         } else if (!strcmp(a, "--ignore")) {
             opt.ignore = strtoul(v, nullptr, 0) != 0, i++;
         } else {
