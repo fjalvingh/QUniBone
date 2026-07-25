@@ -90,33 +90,47 @@ This is the key thing to understand before touching bus-timing or device-registe
 
 ## Build
 
-The software is built for BeagleBone hardware — it does not build or run on a generic desktop Linux
-box (it depends on the PRU subsystem, `prussdrv`, and BeagleBone GPIO/pinmux). There is no CI, and
-for everything except the CPU emulation cores verification happens by running the `demo` binary
-interactively on real UniBone/QBone hardware.
+The software targets BeagleBone hardware — it does not build or run on a generic desktop Linux box
+(it depends on the PRU subsystem, `prussdrv`, and BeagleBone GPIO/pinmux). There is no CI, and for
+everything except the CPU emulation cores verification happens by running the `demo` binary
+interactively on real UniBone/QBone hardware. There are two ways to build it, below: directly on the
+BBB, or cross-compiled from an x64 host.
 
-The one exception is the **CPU emulation core test suite** in `10.05_cputest/`, which runs on the
-build machine as part of every `./compile.sh` and `./crossco` — see the section below.
+The one exception to "verify on real hardware" is the **CPU emulation core test suite** in
+`10.05_cputest/`, which runs on the build machine (host-native either way, see that section) as part
+of every `./compile.sh` and `./crossco` — see the section below.
 
-Environment setup (once per shell, before building):
-```bash
-. qunibone-platform.env      # QUNIBONE_PLATFORM=UNIBUS|QBUS, QUNIBONE_PLATFORM_SUFFIX=_u|_q
-```
-Building on the BBB itself also sources `compile-bbb.env`; cross-compiling from x64 sources
-`crosscompile.env` (see below — a different, self-bootstrapping file from the `qunibone-platform.env`
-used by `compile.sh`). `compile-x64.env` is an older, unused variant of the same idea (stale
-toolchain paths, not referenced by `crossco`); Eclipse remote-debug setups reference `QUNIBONE_DIR`,
-`BBB_CC`, `PRU_CGT`.
+### On UniBone/QBone hardware
 
 Compile everything (PRU firmware + the `demo` ARM binary):
 ```bash
 ./compile.sh          # incremental
 ./compile.sh -a       # `make clean` first, full rebuild
 ```
+`compile.sh` sources `qunibone-platform.env` (`QUNIBONE_PLATFORM=UNIBUS|QBUS`,
+`QUNIBONE_PLATFORM_SUFFIX=_u|_q` — hardware-specific and NOT checked into the repo; copy
+`qunibone-platform.env.example` to create it, or let `qunibone-platform.sh` generate it) and
+`compile-bbb.env` (`BBB_CC=gcc`, `PRU_CGT=/usr/share/ti/cgt-pru/`) itself — no manual
+`. qunibone-platform.env` step needed first. `compile-x64.env` is an older, unused variant of
+`compile-bbb.env` (stale toolchain paths, not referenced by `compile.sh` or `crossco`); Eclipse
+remote-debug setups reference `QUNIBONE_DIR`, `BBB_CC`, `PRU_CGT`.
+
 Under the hood this is `make` in `10.03_app_demo/2_src`, whose top-level `Makefile` just dispatches
 to `makefile_u` or `makefile_q` based on `QUNIBONE_PLATFORM`. That makefile in turn builds the PRU0
 and PRU1 firmware images (as linkable C arrays dropped into `10.01_base/4_deploy_u|q/`) and then
 compiles/links the `demo` ARM binary, pulling in the device sources listed as `$(OBJECTS)`.
+
+Run the resulting binary:
+```bash
+./demo.sh              # wraps ~/10.03_app_demo/4_deploy/demo --verbose
+```
+
+To build/rebuild a single object file directly, invoke make with the right variables, e.g. from
+`10.03_app_demo/2_src`:
+```bash
+QUNIBONE_PLATFORM=UNIBUS QUNIBONE_PLATFORM_SUFFIX=_u MAKE_CONFIGURATION=RELEASE make ../4_deploy_u/rl11.o
+```
+`make print-VARNAME` (from that same makefile) dumps any make variable for debugging the build.
 
 ### Cross-compiling from x64 (verified working)
 
@@ -167,25 +181,17 @@ for an unrecognized flag all behave as intended; only pre-existing
 same day after the DBG-by-default/`-r` change: a plain `./crossco -a` compiles with `-ggdb3 -O0`
 and links a `demo` with debug info; `./crossco -a -r` compiles with `-O3` instead.
 
-Note: `qunibone-platform.env` (used by `compile.sh` for on-device builds) and `crosscompile.env`
-(used by `crossco`) are two separate, independent files that both happen to configure
-`QUNIBONE_PLATFORM`/`QUNIBONE_PLATFORM_SUFFIX` — keep both in sync manually if you switch platforms
-and use both build paths.
+Note: `qunibone-platform.env` (sourced by `compile.sh`, and separately by `qunibone-platform.sh` to
+drive the `_u`/`_q` symlinks — see [Bus differentiation](#bus-differentiation-_u--_q) above) and
+`crosscompile.env` (used only by `crossco`) are two separate, independent files that both happen to
+configure `QUNIBONE_PLATFORM`/`QUNIBONE_PLATFORM_SUFFIX` — keep both in sync manually if you switch
+platforms and use both build paths. `crossco` doesn't touch the `_u`/`_q` symlinks at all.
 
-To build/rebuild a single object file directly, invoke make with the right variables, e.g. from
-`10.03_app_demo/2_src`:
-```bash
-QUNIBONE_PLATFORM=UNIBUS QUNIBONE_PLATFORM_SUFFIX=_u MAKE_CONFIGURATION=RELEASE make ../4_deploy_u/rl11.o
-```
-`make print-VARNAME` (from that same makefile) dumps any make variable for debugging the build.
-
-Run the resulting binary:
-```bash
-./demo.sh              # wraps ~/10.03_app_demo/4_deploy/demo --verbose
-```
+### Adding a device source file
 
 Adding a new device source file requires adding its `.o` to `$(OBJECTS)` in **both**
-`makefile_u` and `makefile_q` (unless the file itself is bus-specific and only belongs in one).
+`makefile_u` and `makefile_q` (unless the file itself is bus-specific and only belongs in one). This
+applies whichever way you build.
 
 ## CPU emulation core tests (`10.05_cputest`)
 
