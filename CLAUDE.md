@@ -200,11 +200,14 @@ emulation cores on the build machine, with no BeagleBone and no backplane involv
 `./compile.sh` and `./crossco` run them after a successful build.
 
 > **The build is currently red on purpose.** The 26 PDP-11/20 runs (13 tapes × 2 cores) pass, as do
-> `FKTBA0`/`FKTCA0`/`FKTDA1` — 29 of 36; the other 7 XXDP 11/34 diagnostics in `3_tapes/cpu34/`
-> still fail, on real defects in the KD11-EA core: an `assert(0)` in `addrop()` that aborts the
-> emulator outright, plus undiagnosed instruction and MMU failures. There is deliberately no
-> expected-failure mechanism to hide them. Full diagnosis in `10.05_cputest/3_tapes/README.md`; use
-> `SKIP_CPUTESTS=1` or `./crossco -n` to build while they are outstanding.
+> `FKTBA0`/`FKTCA0`/`FKTDA1` — 29 of 36; `FKTGC0` is skipped (`ignore = 1` in its `.opt` sidecar —
+> it tests console hardware the fake bus does not have, so its result says nothing about the core);
+> the other 6 XXDP 11/34 diagnostics in `3_tapes/cpu34/` still fail, on real defects in the KD11-EA
+> core: an `assert(0)` in `addrop()` that aborts the emulator outright, plus undiagnosed instruction
+> and MMU failures. There is deliberately no expected-failure mechanism to hide those — `ignore` is
+> only for tapes that are out of scope for the harness, not for known core defects. Full diagnosis
+> in `10.05_cputest/3_tapes/README.md`; use `SKIP_CPUTESTS=1` or `./crossco -n` to build while they
+> are outstanding.
 
 This is possible because a core (`cpu20/ka11.c`, `cpu34/kd11ea.c` + `cpu34/kt11d.c`) is plain C
 that reaches the outside world **only** through the ten `unibone_*()` functions of
@@ -226,7 +229,9 @@ array plus KL11/KW11 register stubs. Nothing in the cores needs changing to be t
   deterministic (no threads: the KL11 interrupt is granted by `testbus_c` itself, from the core's
   `unibone_grant_interrupts()` call), so the replay is exact. A tape which exercises the KL11 as a
   device sends the whole character set as data, BEL included, and must turn the rule off with
-  `bell-is-pass = 0` in its `.opt` sidecar — `cpu34/FKTGC0.BIC` is the one such tape.
+  `bell-is-pass = 0` in its `.opt` sidecar — `cpu34/FKTGC0.BIC` is the one such tape (currently
+  also `ignore = 1`, see above). An `ignore = 1` sidecar skips a tape entirely: the runner prints
+  `SKIP` and exits 0.
 - **Stamp driven**: one stamp per (core, tape) under `10.05_cputest/4_deploy/stamps/`, depending on
   the tape and on the `cputest` binary. An ordinary build re-runs nothing; touching a core or the
   harness re-runs all pairs (both cores live in one binary, so the granularity is per binary, not

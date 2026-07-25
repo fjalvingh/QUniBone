@@ -23,10 +23,11 @@ cores. They do not need to be copied here.
 | ZKAAA0 … ZKAMA0 (13) | cpu20 | **all pass** |
 | ZKAAA0 … ZKAMA0 (13) | cpu34 | **all pass** |
 | `cpu34/FKTBA0`, `FKTCA0`, `FKTDA1` | cpu34 | **pass** |
-| `cpu34/FKAAC0`, `FKABD1`, `FKACA0`, `FKTAA0`, `FKTFA0`, `FKTGC0` | cpu34 | **fail** — see below |
+| `cpu34/FKAAC0`, `FKABD1`, `FKACA0`, `FKTAA0`, `FKTFA0` | cpu34 | **fail** — see below |
 | `cpu34/FKTHB0` | cpu34 | **aborts** the emulator — see below |
+| `cpu34/FKTGC0` | cpu34 | **ignored** (`ignore = 1` in its `.opt`) — see below |
 
-**Seven of the ten 11/34 XXDP diagnostics still fail, so the build is red.** That
+**Six of the ten 11/34 XXDP diagnostics still fail, so the build is red.** That
 is deliberate: the failures are real defects in the KD11-EA core which these
 tapes exist to find, and hiding them behind an expected-failure list was rejected
 in favour of keeping them visible. See the diagnosis below before assuming the
@@ -125,7 +126,7 @@ the threads — which is what keeps a run repeatable:
 
 **`FKTDA1` passes** as a result, in 63805 instructions.
 
-### 5. Not yet diagnosed (6 tapes)
+### 5. Not yet diagnosed (5 tapes)
 
 - `FKAAC0` — 2206 instructions, then a HALT at 012132 reached from a `MOV R0,(R0)`
   condition code check around 012104; the diagnostic's own error report path, so a
@@ -136,12 +137,19 @@ the threads — which is what keeps a run repeatable:
   MMR0/MMR1/MMR2 (all three compare equal) and then a register against 016700,
   which does not match, and halts at 001656.
 - `FKACA0` — spins around 004174 until the 400 M instruction limit.
-- `FKTGC0` — drives the KL11 itself, sending the whole character set 0…177 round
-  and round through the interrupt driven transmitter, and halts at 003300 after
-  13 sweeps. Note its `.opt` sidecar: a BEL is character 007 of that sweep, so
-  this is the one tape whose console traffic is data and where a BEL must **not**
-  be read as end of pass — otherwise it is called passed after 634 instructions,
-  on the seventh character it prints. How a correct run ends is still unknown.
+
+### 6. Ignored: `FKTGC0`
+
+`FKTGC0` drives the KL11 itself, sending the whole character set 0…177 round
+and round through the interrupt driven transmitter, and halts at 003300 after
+13 sweeps. It tests far more console hardware behaviour than the minimal KL11
+stub in `testbus.cpp` provides, so its result says nothing about the CPU core —
+its `.opt` sidecar sets `ignore = 1` and the runner reports it as `SKIP`
+without running it. The sidecar also keeps `bell-is-pass = 0` for whenever it
+is re-enabled: a BEL is character 007 of its sweep, so this is the one tape
+whose console traffic is data and where a BEL must **not** be read as end of
+pass — otherwise it is called passed after 634 instructions, on the seventh
+character it prints.
 
 ## A tape needs different settings?
 
@@ -153,9 +161,12 @@ ram-words = 61440
 maxsteps  = 800000000
 ```
 
-Recognized keys are `maxsteps`, `ram-words`, `sw` (octal), `tracelines` and
-`bell-is-pass` — the long forms of the `cputest` options, without the leading
-dashes. Run `4_deploy/cputest --help` for the defaults.
+Recognized keys are `maxsteps`, `ram-words`, `sw` (octal), `tracelines`,
+`bell-is-pass` and `ignore` — the long forms of the `cputest` options, without
+the leading dashes. `ignore = 1` skips the tape entirely: the runner prints a
+`SKIP` line and exits 0, for a tape that is out of scope for this harness
+(e.g. one testing hardware the fake bus does not have) rather than one finding
+a real core defect. Run `4_deploy/cputest --help` for the defaults.
 
 ## How a run is judged
 

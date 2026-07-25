@@ -59,6 +59,10 @@ struct options_t {
     uint64_t tracelines = 500;
     // is a BEL on the console the end-of-pass signal? See testbus_c::bell_is_pass.
     bool bell_is_pass = true;
+    // do not run the tape at all: report SKIP and exit 0. For a tape that is
+    // out of scope for this harness, e.g. one testing hardware the fake bus
+    // does not have.
+    bool ignore = false;
 };
 
 static void usage(const char *argv0)
@@ -73,6 +77,8 @@ static void usage(const char *argv0)
     fprintf(stderr, "  --tracelines <n>    instructions to trace before a failure (0 = none)\n");
     fprintf(stderr, "  --bell-is-pass <n>  1 = a BEL on the console ends a pass (default), 0 = not:\n");
     fprintf(stderr, "                      for a tape which sends the character set as test data\n");
+    fprintf(stderr, "  --ignore <n>        1 = do not run the tape: report SKIP, exit 0.\n");
+    fprintf(stderr, "                      For a tape testing hardware the fake bus does not have\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Settings may also be put in a \"<file.BIN>.opt\" next to the tape, as\n");
     fprintf(stderr, "\"key = value\" lines using the option names without the leading dashes.\n");
@@ -114,6 +120,8 @@ static std::string read_tape_options(const char *tapepath, options_t &opt)
             opt.tracelines = strtoull(value, nullptr, 0);
         else if (!strcmp(key, "bell-is-pass"))
             opt.bell_is_pass = strtoul(value, nullptr, 0) != 0;
+        else if (!strcmp(key, "ignore"))
+            opt.ignore = strtoul(value, nullptr, 0) != 0;
         else {
             char buff[256];
             sprintf(buff, "%s(%u): unknown option \"%s\"", path.c_str(), linenr, key);
@@ -188,6 +196,8 @@ int main(int argc, char **argv)
             opt.tracelines = strtoull(v, nullptr, 0), i++;
         } else if (!strcmp(a, "--bell-is-pass")) {
             opt.bell_is_pass = strtoul(v, nullptr, 0) != 0, i++;
+        } else if (!strcmp(a, "--ignore")) {
+            opt.ignore = strtoul(v, nullptr, 0) != 0, i++;
         } else {
             fprintf(stderr, "%s: unknown option \"%s\"\n", argv[0], a);
             usage(argv[0]);
@@ -208,6 +218,11 @@ int main(int argc, char **argv)
     // the tape name without directory, for the one line result
     const char *tapename = strrchr(opt.tapepath, '/');
     tapename = tapename ? tapename + 1 : opt.tapepath;
+
+    if (opt.ignore) {
+        printf("SKIP  %-6s %-12s (ignored, see %s.opt)\n", opt.corename, tapename, tapename);
+        return 0;
+    }
 
     testcore_c *core = testcore_c::create(opt.corename);
     if (core == nullptr) {

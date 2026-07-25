@@ -71,6 +71,8 @@ the PAR to 12 bits.
 - MFPI/MTPI (and MFPD/MTPD, identical here since there is no I/D space) and RTT implemented; they
   used to take the reserved instruction trap. RTI/RTT may not change the mode or priority fields in
   user mode, and RTI takes a pending trace trap immediately where RTT defers it by one instruction.
+  These are really implemented on the 11/34 and even the D variants are decoded; these only got their
+  new meaning in the pdp 11/45.
 - The stack limit red zone applies to the kernel stack only.
 - The RESET opcode no longer resets the memory management: bus INIT does not reach the KT11-D on real
   hardware, and an OS executing RESET must keep its address map. `kd11ea_reset()` is now the RESET
