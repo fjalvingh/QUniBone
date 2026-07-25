@@ -36,7 +36,24 @@ kt11d_reset(KT11D *mmu)
 	memset(mmu, 0, sizeof(*mmu));
 	mmu->space = KT11D_SPACE_KERNEL;
 	mmu->prev_space = KT11D_SPACE_KERNEL;
-	mmu->access_space = KT11D_SPACE_KERNEL;
+	kt11d_set_access(mmu, KT11D_SPACE_KERNEL, KT11D_MODE_KERNEL);
+	kt11d_rebuild_all(mmu);
+}
+
+/* Bus INIT: the RESET opcode and console start.
+ Unlike a power-up this does not clear the address map - the PAR/PDR pairs are
+ not affected by INIT, so an OS which executes RESET keeps its mapping - but it
+ does clear MMR0..MMR2, which among other things turns relocation off and
+ releases an abort freeze. MAINDEC DFKTA-A checks it directly: it sets MMR0<8>,
+ executes RESET and expects the bit to read back as zero; DFKTH-B tests it as
+ "SR0 OR SR2 WERE NOT RESET BY A RESET". */
+void
+kt11d_init(KT11D *mmu)
+{
+	mmu->mmr0 = 0;
+	mmu->mmr1 = 0;
+	mmu->mmr2 = 0;
+	mmu->mmr1_count = 0;
 	kt11d_rebuild_all(mmu);
 }
 
@@ -90,6 +107,7 @@ kt11d_rebuild_all(KT11D *mmu)
 	unsigned i;
 	mmu->enabled = !!(mmu->mmr0 & KT11D_MMR0_ENABLE);
 	mmu->frozen = !!(mmu->mmr0 & KT11D_MMR0_ABORTS);
+	mmu->maint = !!(mmu->mmr0 & KT11D_MMR0_MAINT);
 	for(i = 0; i < 16; i++)
 		kt11d_rebuild(mmu, i);
 }
@@ -100,11 +118,15 @@ kt11d_rebuild_all(KT11D *mmu)
 void
 kt11d_set_modes(KT11D *mmu, word psw)
 {
-	mmu->space = ((psw >> 14) & 3) == KT11D_MODE_KERNEL ?
+	mmu->mode = (psw >> 14) & 3;
+	mmu->prev_mode = (psw >> 12) & 3;
+	// the space is only ever kernel or user; a reference in one of the two
+	// modes which have no space of their own aborts before it is used
+	mmu->space = mmu->mode == KT11D_MODE_KERNEL ?
 			KT11D_SPACE_KERNEL : KT11D_SPACE_USER;
-	mmu->prev_space = ((psw >> 12) & 3) == KT11D_MODE_KERNEL ?
+	mmu->prev_space = mmu->prev_mode == KT11D_MODE_KERNEL ?
 			KT11D_SPACE_KERNEL : KT11D_SPACE_USER;
-	mmu->access_space = mmu->space;
+	kt11d_set_access(mmu, mmu->space, mmu->mode);
 }
 
 /* An access was refused. Record the cause in MMR0, which freezes MMR0<6:1>,
@@ -142,7 +164,30 @@ kt11d_abort(KT11D *mmu, word va, unsigned space, unsigned access)
 
 	if(!mmu->frozen){
 		mmu->mmr0 = (mmu->mmr0 & ~(KT11D_MMR0_MODE|KT11D_MMR0_PAGE)) | bits
-				| ((space == KT11D_SPACE_KERNEL ? KT11D_MODE_KERNEL : KT11D_MODE_USER) << 5)
+				| (mmu->access_mode << 5)
+				| (page << 1);
+		mmu->frozen = 1;
+	}
+	return 1;
+}
+
+/* A reference made in a processor mode the KD11-EA does not have, PSW<15:14> =
+ 01 or 10. There is no page table to consult, so it aborts like a non-resident
+ page, with MMR0<6:5> holding the mode which does not exist - MAINDEC DFKTA-A
+ sets PSW to 040000, expects the next reference to abort and MMR0 to read
+ 100040. DFKTH-B tests it as "ILLEGAL MODE 01 NOT ABORTED". */
+int
+kt11d_abort_mode(KT11D *mmu, word va)
+{
+	unsigned page = (va >> 13) & 7;
+
+	trace("MMU abort [%06o], illegal mode %o, MMR0 bits %06o\n", va,
+			mmu->access_mode, KT11D_MMR0_ABORT_NONRESIDENT);
+
+	if(!mmu->frozen){
+		mmu->mmr0 = (mmu->mmr0 & ~(KT11D_MMR0_MODE|KT11D_MMR0_PAGE))
+				| KT11D_MMR0_ABORT_NONRESIDENT
+				| (mmu->access_mode << 5)
 				| (page << 1);
 		mmu->frozen = 1;
 	}

@@ -31,7 +31,7 @@ does not, it says what the run is seen to exercise.
 | `cpu34/FKAAC0` | MAINDEC-11-DFKAA-C, "11/34 BSC INST TST" — basic instruction set | — | **PASS** (10888 instructions) |
 | `cpu34/FKABD1` | MAINDEC-11-DFKAB-D, "11/34 TRAPS TST" — trap vectors, trap-within-trap, the kernel stack limit, the reserved instructions, interrupt priority and the WAIT | — | **PASS** (319027 instructions) |
 | `cpu34/FKACA0` | MAINDEC-11-DFKAC-A, no banner — EIS (MUL/DIV/ASH/ASHC) and MFPS/MTPS exerciser | — | **PASS** (4847 instructions) |
-| `cpu34/FKTAA0` | MAINDEC-11-DFKTA-A, "11/34 MEMORY MANAGEMENT LOGIC TEST" — KT11-D registers and relocation | — | **FAIL** |
+| `cpu34/FKTAA0` | MAINDEC-11-DFKTA-A, "11/34 MEMORY MANAGEMENT LOGIC TEST" — KT11-D registers and relocation | — | **PASS** (15938177 instructions) |
 | `cpu34/FKTBA0` | MAINDEC-11-DFKTB-A, "11/34 MEMORY MANAG. ACCESS KEYS TEST" — PDR access control | — | **PASS** (4573156 instructions) |
 | `cpu34/FKTCA0` | MAINDEC-11-DFKTC-A, no banner — MFPI/MTPI/MFPD/MTPD between the kernel and user spaces | — | **PASS** (758275 instructions) |
 | `cpu34/FKTDA1` | MAINDEC-11-DFKTD-A, no banner — mode protection: HALT and RESET outside kernel mode, previous-mode instructions, device interrupts | — | **PASS** (63805 instructions) |
@@ -39,8 +39,8 @@ does not, it says what the run is seen to exercise.
 | `cpu34/FKTGC0` | MAINDEC-11-DFKTG-C, no banner — drives the KL11 console itself | — | **SKIP** (`ignore = 1`) |
 | `cpu34/FKTHB0` | MAINDEC-11-DFKTH-B, "11/34 MEMORY MGMT. DIAG." — full KT11-D diagnostic | — | **FAIL** |
 
-33 of 36 runs pass, 1 is skipped, **2 fail, so the build is red**. That is
-deliberate: the failures are real defects the tapes exist to find, and there is
+34 of 36 runs pass, 1 is skipped, **1 fails, so the build is red**. That is
+deliberate: the failure is real defects the tape exists to find, and there is
 no expected-failure mechanism to hide them. `SKIP_CPUTESTS=1` or `./crossco -n`
 builds without running them.
 
@@ -52,60 +52,28 @@ transmitter and halts at 003300 after 13 sweeps. Its `.opt` sidecar sets
 is character 007 of its sweep, so this is the one tape whose console traffic is
 data and where a BEL must **not** be read as end of pass.
 
-## FKTAA0 — halt at 003060 after 4522485 instructions
+## FKTHB0 — instruction limit reached at 030104 after 400 M instructions
 
-MMR0<8>, maintenance ("destination") mode, is not implemented: `kt11d.c` knows
-only `KT11D_MMR0_ENABLE` (MMR0<0>), so with just bit 8 set relocation stays off
-altogether.
-
-The tape sets up kernel page 0 (KIPAR0 = 000001, KIPDR0 = 077406), writes
-000400 to MMR0 and then does:
-
-```
-003040  012701 003112  MOV #3112,R1
-003044  012777 000400 175752   ; MMR0 (177572) := 000400, maintenance mode
-003052  021111         CMP (R1),(R1)   ; the two reads must differ
-003054  001001         BNE .+4
-003056  000000         HALT
-```
-
-In maintenance mode only the destination reference is relocated, so the second
-read of `(R1)` should come from a different physical address than the first. The
-core relocates neither: both DATIs return 132465, the `BNE` is not taken and the
-tape halts at 003056 (reported as 003060). Only the banner has been printed at
-that point.
-
-## FKTHB0 — instruction limit reached at 030060 after 400 M instructions
-
-Not a hang: the tape completes **49 passes** inside the limit, and reports errors
-on every one of them, so it never prints the BEL that means "end of pass, no
-errors" and the runner only ever sees the limit. It is the broadest of the
-KT11-D tapes and finds a long list of defects. Distinct messages, with the
-number of times each was printed over those 49 passes:
+Not a hang: the tape completes **49 passes** inside the limit, and reports three
+errors on every one of them, so it never prints the BEL that means "end of pass,
+no errors" and the runner only ever sees the limit. It is the broadest of the
+KT11-D tapes, and the only one still failing. Distinct messages, with the number
+of times each was printed over those 49 passes (`SR0`/`SR1`/`SR2` are the tape's
+names for MMR0/MMR1/MMR2):
 
 | times | message | test |
 |---|---|---|
-| 12500 | `PAGE LGTH. ABORT DID NOT OCCUR WHEN IT SHOULD HAVE` | 36 |
-| 500 | `PHYS. ADDR. FORMED WRONG IN MAINT. MODE` | 25, 26 |
-| 148 | `SR2 NOT TRACKING CORRECTLY` | 12 |
-| 147 | `MEM. MGMT. REG. BITS NOT SET CORRECTLY` (wrote 100000, read 100146) | 12, 14 |
-| 50 | `MEM. MGMT. REG. WOULD NOT CLEAR` (MMR0 read back 160000) | 12 |
-| 50 | `SR1 DID NOT READ ALL ZEROS` (read 000027) | 14 |
-| 50 | `WRITING SR0 SET W-BIT IN KIPDR7` | 32 |
-| 50 | `DATA INCORRECT AFTER A MAINT. MODE WRITE` (wrote 177777, read 000377) | 24 |
-| 50 | `ILLEGAL MODE 01 NOT ABORTED` | 35 |
-| 49 | `SR0 EFFECTED BY WRITE TO PSW` (read 000146) | 13 |
-| 49 | `SR0 OR SR2 WERE NOT "RESET" BY A RESET` | 41 |
-| 49 | `NON RESIDENT ABORT DID NOT OCCUR` | 41 |
-| 49 | `ERROR FLAG FOR NR ABORT (BIT15) IN SR0 DID NOT SET` | 41 |
-| 49 | `SR2 DID NOT FREEZE THE VIRTUAL ADDRS OF THE ABORTD INTR` | 41 |
-| 49 | `SR0 WAS NOT CLEARED BY INIT.` | 41 |
-| 49 | `SR0 OR SR2 CHANGED BY ODD ADDR. ERROR` | 44 |
+| 50 | `SR1 DID NOT READ ALL ZEROS` (read 000027, at 022214) | 14 |
+| 50 | `WRITING SR0 SET W-BIT IN KIPDR7` (PDR 077506, expected 077406, at 026252) | 32 |
+| 49 | `SR0 OR SR2 CHANGED BY ODD ADDR. ERROR` (MMR0 000001, expected 000017, at 031530) | 44 |
 
-`SR0`/`SR1`/`SR2` are the tape's names for MMR0/MMR1/MMR2. The maintenance mode
-entries are the same missing MMR0<8> as `FKTAA0` above; the rest — page length
-and non-resident aborts not happening, MMR0 bits not settable or clearable,
-MMR2 not tracking or not freezing — are separate, undiagnosed KT11-D defects.
+All three are undiagnosed KT11-D defects: MMR1 keeping a register log it should
+not, a write to MMR0 setting the W bit of a PDR it only names, and an odd
+address error disturbing MMR0. The 13 further messages this tape used to print —
+page length and non-resident aborts not happening, maintenance mode forming
+wrong addresses, MMR0 bits not settable or clearable, MMR2 not tracking or not
+freezing, RESET not clearing MMR0 — are gone with the `FKTFA0` and `FKTAA0`
+rounds of fixes.
 
 ## A tape needs different settings?
 
@@ -152,5 +120,5 @@ deterministic. To reproduce one by hand:
 
 ```bash
 10.05_cputest/4_deploy/cputest --core cpu34 \
-    --tape 10.05_cputest/3_tapes/cpu34/FKTAA0.BIC --tracelines 40
+    --tape 10.05_cputest/3_tapes/cpu34/FKTHB0.BIC --tracelines 40
 ```

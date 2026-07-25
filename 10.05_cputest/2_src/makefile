@@ -161,8 +161,12 @@ $(OBJDIR)/testcore_cpu20.o: testcore_cpu20.cpp testcore.hpp \
 		$(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu20/ka11.h | $(OBJDIR)
 	$(HOST_CXX) $(CXXFLAGS) $< -o $@
 
+# kt11d.h too: KD11EA holds a KT11D by value, so a change to the MMU struct
+# changes the size of the core this object allocates. Missing that dependency
+# does not fail to link, it corrupts the heap at run time.
 $(OBJDIR)/testcore_cpu34.o: testcore_cpu34.cpp testcore.hpp \
-		$(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu34/kd11ea.h | $(OBJDIR)
+		$(DEVICE_SRC_DIR)/cpu_core.h $(DEVICE_SRC_DIR)/cpu34/kd11ea.h \
+		$(DEVICE_SRC_DIR)/cpu34/kt11d.h | $(OBJDIR)
 	$(HOST_CXX) $(CXXFLAGS) $< -o $@
 
 ### the emulation cores under test, compiled from the shipped sources

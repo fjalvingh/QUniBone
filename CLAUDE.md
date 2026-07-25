@@ -204,14 +204,14 @@ emulation cores on the build machine, with no BeagleBone and no backplane involv
 `./compile.sh` and `./crossco` run them after a successful build.
 
 > **The build is currently red on purpose.** The 26 PDP-11/20 runs (13 tapes × 2 cores) pass, as do
-> `FKAAC0`/`FKABD1`/`FKACA0`/`FKTBA0`/`FKTCA0`/`FKTDA1`/`FKTFA0` — 33 of 36; `FKTGC0` is skipped
-> (`ignore = 1` in its `.opt` sidecar — it tests console hardware the fake bus does not have, so its
-> result says nothing about the core); the other 2 XXDP 11/34 diagnostics in `3_tapes/cpu34/` still
-> fail: the KT11-D maintenance mode and further MMU defects (`FKTAA0`,
-> `FKTHB0`). There is deliberately no expected-failure mechanism to hide those — `ignore`
+> `FKAAC0`/`FKABD1`/`FKACA0`/`FKTAA0`/`FKTBA0`/`FKTCA0`/`FKTDA1`/`FKTFA0` — 34 of 36; `FKTGC0` is
+> skipped (`ignore = 1` in its `.opt` sidecar — it tests console hardware the fake bus does not have,
+> so its result says nothing about the core); one XXDP 11/34 diagnostic in `3_tapes/cpu34/` still
+> fails, on three remaining KT11-D defects: `FKTHB0`, the full memory management diagnostic. There is
+> deliberately no expected-failure mechanism to hide that — `ignore`
 > is only for tapes that are out of scope for the harness, not for known core defects. Full
 > diagnosis in `10.05_cputest/3_tapes/README.md`; use `SKIP_CPUTESTS=1` or `./crossco -n` to build
-> while they are outstanding.
+> while it is outstanding.
 
 This is possible because a core (`cpu20/ka11.c`, `cpu34/kd11ea.c` + `cpu34/kt11d.c`) is plain C
 that reaches the outside world **only** through the ten `unibone_*()` functions of
@@ -255,7 +255,7 @@ rejected as a "paper tape botch".
 
 Coverage: ZKA\* covers the 11/20 base instruction set on both cores. The 11/34 specifics — EIS,
 MFPS/MTPS, the KT11-D — are covered by the XXDP `FKA*`/`FKT*` tapes in `3_tapes/cpu34/`, which are
-wired in and pass except for the two KT11-D tapes named in the warning above.
+wired in and pass except for the one KT11-D tape named in the warning above.
 
 ## Change log
 

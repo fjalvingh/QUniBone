@@ -12,6 +12,53 @@ contract to the QUNIBUS adapter is `../cpu_bus_adapter.h`.
 
 ## Unreleased
 
+### KT11-D: maintenance mode, RESET and the modes which do not exist, found by FKTAA0
+
+`FKTAA0`, the memory management logic tape, halted after 4522485 instructions. Three defects in the
+KT11-D, again each uncovered by fixing the one before it; the tape now runs clean (15938177
+instructions per pass). All three are KT11-D behaviour that was simply not implemented, not wrong
+arithmetic.
+
+- **Maintenance mode (MMR0<8>) did not exist.** MMR0<8> was not even writable, so with only that bit
+  set relocation stayed off altogether and the tape's `CMP (R1),(R1)` — whose two reads must come
+  from different physical addresses — compared a location with itself. Maintenance mode relocates
+  the *destination* operand references of an instruction while relocation itself is off, so that a
+  diagnostic can compare a relocated address against the unrelocated one the same instruction formed
+  for its source; no software uses it. `kt11d_relocate()` now has this second way in, and `kd11ea.c`
+  marks which references are the destination's: `set_dest_ref()`, set by `readop()`/`writedest()`
+  and the new `addrdest()` for the single-operand instructions, cleared at the start of an
+  instruction, on entry to the trap sequence and by `PUSH`.
+
+  What counts is narrower than "every reference the destination makes": the words that *form* the
+  address — an index word out of the instruction stream, the pointer word of a deferred mode — are
+  not relocated, only the access to the operand itself. The tape settles it in both directions, with
+  a `CMP #x, @#y` whose `y` must be read unrelocated for the destination reference to reach `y` at
+  all, and a `CMPB #x, @#y` which then expects the relocated `y`.
+- **RESET left the MMU registers alone.** The comment here said bus INIT does not reach the memory
+  management; the tape says otherwise, setting MMR0<8>, executing `RESET` and expecting the bit to
+  read back as zero (`FKTHB0` tests the same as "SR0 OR SR2 WERE NOT RESET BY A RESET"). INIT clears
+  MMR0..MMR2 — which switches relocation off and releases an abort freeze — but not the address map,
+  so an OS executing `RESET` still keeps its PAR/PDR pairs. That is the new `kt11d_init()`, called
+  from `kd11ea_reset()`; `kd11ea_power_reset()` continues to clear everything through
+  `kt11d_reset()`.
+- **PSW<15:14> = 01 or 10 behaved like user mode.** The KD11-EA has kernel and user and nothing else
+  — 01 is the supervisor mode of the 11/45 — and a memory reference made in one of them aborts
+  whatever it addresses. The MMU only ever tracked the derived address space, so the two modes it
+  does not have were indistinguishable from user. It now keeps `mode`/`prev_mode`/`access_mode`
+  beside the spaces, aborts through the new `kt11d_abort_mode()`, and MMR0<6:5> reports the mode the
+  reference was actually made in instead of a kernel/user bit. The tape sets PSW to 040000 and
+  expects MMR0 to read 100040; `FKTHB0` tests it as "ILLEGAL MODE 01 NOT ABORTED". The three
+  `SPACE()` sites in `kd11ea.c` became `SPACE_KERNEL`/`SPACE_PREV`/`SPACE_RESTORE`, which set the
+  space and the mode together.
+
+Outside this directory, one dependency was missing from `10.05_cputest/2_src/makefile`:
+`testcore_cpu34.o` holds a `KD11EA` by value, which holds a `KT11D`, but did not depend on
+`kt11d.h`. Growing the MMU struct then linked a binary whose objects disagreed about its size and
+corrupted the heap at run time rather than failing to build.
+
+Verified: cross-compile plus the full cputest run — 34 of 36 runs pass, only `FKTHB0` is left, 1 is
+skipped. Not run on real hardware.
+
 ### MMU aborts: three defects found by FKTFA0
 
 `FKTFA0`, the MMU abort tape, halted after 332 instructions. Three defects, each uncovered by fixing

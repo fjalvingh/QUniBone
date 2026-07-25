@@ -148,10 +148,11 @@ kd11ea_reset(KD11EA *cpu)
 	cpu->external_intr = 0;
 	pthread_mutex_unlock(&cpu->mutex) ;
 
-	// The KT11-D is deliberately NOT touched here: on real hardware the RESET
-	// opcode pulses bus INIT, which does not reach the memory management.
-	// An OS executing RESET must keep its address map - see kd11ea_power_reset()
-	// for the console START / power-up case.
+	// INIT reaches MMR0..MMR2 of the KT11-D but not its address map: an OS
+	// executing RESET keeps its PAR/PDR pairs, but relocation is switched off
+	// and an abort freeze released. See kd11ea_power_reset() for the console
+	// START / power-up case, which clears the map as well.
+	kt11d_init(&cpu->mmu);
 }
 
 // console START and power-up: everything kd11ea_reset() does, plus the state
@@ -328,11 +329,24 @@ abort:
 	return 1;
 }
 
+/* Mark the references that follow as belonging to the destination operand.
+ Only maintenance mode (MMR0<8>, see kt11d_relocate()) looks at this, but it
+ has to be right for every instruction, so it is set where the operand is
+ handled rather than at the call sites. Cleared again at the start of the next
+ instruction and on entry to the trap sequence, which are the two places a
+ reference is made that belongs to no operand at all. */
+static void
+set_dest_ref(KD11EA *cpu, int is_dest)
+{
+	cpu->mmu.dest_ref = is_dest;
+}
+
 static int
 addrop(KD11EA *cpu, int m, int b)
 {
 	int r;
 	int ai;
+	unsigned dest;
 	r = m&7;
 	m >>= 3;
 	ai = 1 + (!b || (r&6)==6 || m&1);
@@ -342,9 +356,22 @@ addrop(KD11EA *cpu, int m, int b)
 	}
 	// a pending autoincrement of an earlier operand has long been committed
 	autoinc_commit(cpu);
+	/* The reads made here form the address - an index word out of the
+	   instruction stream, the pointer word of a deferred mode - and are not
+	   the reference to the operand itself, so maintenance mode does not
+	   relocate them however the operand is used. Only the access which
+	   follows, in fetchop() or writedest(), is the destination reference.
+	   MAINDEC DFKTA-A pins both halves of that down: a `CMP #x, @#y` in
+	   maintenance mode whose y must be read unrelocated for the destination
+	   reference to reach y at all, and a `CMPB #x, @#y` which then expects the
+	   *relocated* y. See set_dest_ref(); "dest" carries the operand's own kind
+	   across the reads below. */
+	dest = cpu->mmu.dest_ref;
+	set_dest_ref(cpu, 0);
 	switch(m&6){
 	case 0:		// REG
 		cpu->b = cpu->ba = cpu->r[r];
+		set_dest_ref(cpu, dest);
 		return 0;	// this already is mode 1
 	case 2:		// INC
 		cpu->ba = cpu->r[r];
@@ -373,6 +400,7 @@ addrop(KD11EA *cpu, int m, int b)
 		if(dati(cpu, 0)) return 1;
 		cpu->b = cpu->ba = cpu->bdata;
 	}
+	set_dest_ref(cpu, dest);
 	return 0;
 
 }
@@ -396,13 +424,24 @@ fetchop(KD11EA *cpu, int t, int m, int b)
 static int
 readop(KD11EA *cpu, int t, int m, int b)
 {
+	set_dest_ref(cpu, t == 011);
 	return !(addrop(cpu, m, b) == 0 && fetchop(cpu, t, m, b) == 0);
+}
+
+/* the destination field of an instruction which has only one: JMP, JSR, SXT,
+ MFPS, MFPI/MTPI. addrop() with what it addresses marked as the destination. */
+static int
+addrdest(KD11EA *cpu, int m, int b)
+{
+	set_dest_ref(cpu, 1);
+	return addrop(cpu, m, b);
 }
 
 static int
 writedest(KD11EA *cpu, word v, int b)
 {
 	int d;
+	set_dest_ref(cpu, 1);
 	if((cpu->ir & 070) == 0){
 		d = cpu->ir & 7;
 		if(b) SETMASK(cpu->r[d], v, 0377);
@@ -482,7 +521,11 @@ step(KD11EA *cpu)
 #define BXT	if(by) b = sxt(b)
 #define BR	PC += br
 #define CBR(c)	if(((c)>>(cpu->psw&017)) & 1) BR
-#define PUSH	SP -= 2; if(!inhov && IS_KERNEL(cpu) && (SP&~0377) == 0) cpu->traps |= TRAP_STACK
+// a push is the machine using the stack (JSR, MFPI, the trap sequence), never
+// an operand of the instruction - a destination which happens to be -(SP) goes
+// through addrop()/writedest() like any other. So it ends a destination
+// reference, which matters in maintenance mode.
+#define PUSH	SP -= 2; set_dest_ref(cpu, 0); if(!inhov && IS_KERNEL(cpu) && (SP&~0377) == 0) cpu->traps |= TRAP_STACK
 // A pop is an autoincrement of SP like any other, and is undone the same way if
 // the read it computed the address for aborts - see autoinc_pending(). Every
 // POP here is immediately followed by the read, which either commits it or
@@ -491,8 +534,9 @@ step(KD11EA *cpu)
 #define POP	SP += 2; autoinc_pending(cpu, 6, 2)
 // force the address space of the next dati()/dato(): trap vector fetches and
 // the trap pushes are always kernel references, MFPI/MTPI use the previous mode
-#define SPACE(s)	cpu->mmu.access_space = (s)
-#define SPACE_RESTORE	cpu->mmu.access_space = cpu->mmu.space
+#define SPACE_KERNEL	kt11d_set_access(&cpu->mmu, KT11D_SPACE_KERNEL, KT11D_MODE_KERNEL)
+#define SPACE_PREV	kt11d_set_access(&cpu->mmu, cpu->mmu.prev_space, cpu->mmu.prev_mode)
+#define SPACE_RESTORE	kt11d_set_access(&cpu->mmu, cpu->mmu.space, cpu->mmu.mode)
 #define OUT(a,d)	cpu->ba = (a); cpu->bdata = (d); if(dato(cpu, 0)) goto be
 #define IN(d)	if(dati(cpu, 0)) goto be; d = cpu->bdata
 #define INA(a,d)	cpu->ba = a; if(dati(cpu, 0)) goto be; d = cpu->bdata
@@ -523,6 +567,8 @@ step(KD11EA *cpu)
 	// MMR1 starts empty; MMR2 latches the address of this instruction only once
 	// the fetch below has succeeded. Both stay frozen while MMR0 holds an abort.
 	kt11d_instruction_start(&cpu->mmu);
+	// the opcode fetch belongs to no operand
+	set_dest_ref(cpu, 0);
 	// whatever the last instruction autoincremented is committed: an abort
 	// of this fetch may not undo it
 	autoinc_commit(cpu);
@@ -901,8 +947,8 @@ step(KD11EA *cpu)
 			else
 				b = cpu->r[df];
 		}else{
-			if(addrop(cpu, dst, 0)) goto be;
-			SPACE(cpu->mmu.prev_space);
+			if(addrdest(cpu, dst, 0)) goto be;
+			SPACE_PREV;
 			if(dati(cpu, 0)){ SPACE_RESTORE; goto be; }
 			SPACE_RESTORE;
 			b = cpu->bdata;
@@ -922,9 +968,9 @@ step(KD11EA *cpu)
 			else
 				cpu->r[df] = b;
 		}else{
-			if(addrop(cpu, dst, 0)) goto be;
+			if(addrdest(cpu, dst, 0)) goto be;
 			cpu->bdata = b;
-			SPACE(cpu->mmu.prev_space);
+			SPACE_PREV;
 			if(dato(cpu, 0)){ SPACE_RESTORE; goto be; }
 			SPACE_RESTORE;
 		}
@@ -935,7 +981,7 @@ step(KD11EA *cpu)
 		if(!by){
 			TR(SXT);
 			if(dm != 0)
-				if(addrop(cpu, dst, 0)) goto be;
+				if(addrdest(cpu, dst, 0)) goto be;
 			// -1 if N is set, 0 if it is clear. setnz() then leaves N as it
 			// was and sets Z exactly when N is clear, which is the rule; C is
 			// not affected.
@@ -952,7 +998,7 @@ step(KD11EA *cpu)
 		// starts at mode 1, so it must not be called for it. A byte
 		// instruction, so the autoincrement/decrement step is 1.
 		if(dm != 0)
-			if(addrop(cpu, dst, 1)) goto be;
+			if(addrdest(cpu, dst, 1)) goto be;
 		// PS<7> is sign extended into a register destination - like MOVB,
 		// and unlike the other byte ops, which leave the high half alone.
 		b = sxt(cpu->psw & 0377);
@@ -968,7 +1014,7 @@ step(KD11EA *cpu)
 	case 0004000:
 	case 0004400:	TR(JSR);
 		if(dm == 0) goto ill;
-		if(addrop(cpu, dst, 0)) goto be;
+		if(addrdest(cpu, dst, 0)) goto be;
 		DR = cpu->ba;
 		PUSH; OUT(SP, cpu->r[sf]);
 		cpu->r[sf] = PC; PC = DR;
@@ -1003,7 +1049,7 @@ step(KD11EA *cpu)
 	switch(cpu->ir & 0777300){
 	case 0100:	TR(JMP);
 		if(dm == 0) goto ill;
-		if(addrop(cpu, dst, 0)) goto be;
+		if(addrdest(cpu, dst, 0)) goto be;
 		PC = cpu->ba;
 		SVC;
 	case 0200:
@@ -1094,6 +1140,8 @@ be:	if(cpu->be > 1){
 
 trap:
 	in_trap = 1;
+	// the vector fetch and the pushes below belong to no operand
+	set_dest_ref(cpu, 0);
 	if (cpu->tracing && unibone_trace_addr(PC-2))
 		trace("TRAP %o\n", TV);
 	trapped_pc = PC;
@@ -1102,7 +1150,7 @@ trap:
 	   PSW<15:14> may still say "user" at this point. Then the new PSW is
 	   installed - which switches the stack pointer - and only then are the
 	   old PSW and PC pushed, onto the new mode's stack. */
-	SPACE(KT11D_SPACE_KERNEL);
+	SPACE_KERNEL;
 	BA = TV;	if(dati(cpu, 0)) goto be;	newpc = cpu->bdata;
 	BA = TV+2;	if(dati(cpu, 0)) goto be;	newpsw = cpu->bdata;
 	SPACE_RESTORE;

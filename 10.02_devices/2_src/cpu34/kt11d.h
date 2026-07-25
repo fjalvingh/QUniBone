@@ -34,7 +34,9 @@ enum {
 	KT11D_SPACE_KERNEL = 0, KT11D_SPACE_USER = 8
 };
 
-/* PSW<15:14> / PSW<13:12> mode encoding */
+/* PSW<15:14> / PSW<13:12> mode encoding. 01 and 10 do not exist on the KD11-EA
+ - 01 is the supervisor mode of the 11/45, which the 11/34 does not have - and
+ a memory reference made in one of them aborts whatever it addresses. */
 enum {
 	KT11D_MODE_KERNEL = 0, KT11D_MODE_USER = 3
 };
@@ -45,11 +47,12 @@ enum {
 	KT11D_MMR0_ABORT_LENGTH = 0040000,		// <14>
 	KT11D_MMR0_ABORT_READONLY = 0020000,	// <13>
 	KT11D_MMR0_ABORTS = 0160000,			// <15:13>: any of them freezes MMR0..2
+	KT11D_MMR0_MAINT = 0000400,				// <8> maintenance/destination mode
 	KT11D_MMR0_MODE = 0000140,				// <6:5> mode at time of abort
 	KT11D_MMR0_PAGE = 0000016,				// <3:1> page at time of abort
 	KT11D_MMR0_ENABLE = 0000001,			// <0> enable relocation
-	// <15:13> and <0> are writable, <6:1> are maintained by the hardware
-	KT11D_MMR0_WRITABLE = 0160001
+	// <15:13>, <8> and <0> are writable, <6:1> are maintained by the hardware
+	KT11D_MMR0_WRITABLE = 0160401
 };
 
 /* PDR bits. <15>, <7> (the KT11-C "A" bit), <5:4> and <0> do not exist */
@@ -91,24 +94,45 @@ struct KT11D
 	unsigned enabled;		// mmr0 & KT11D_MMR0_ENABLE
 	unsigned space;			// address space of the current processor mode
 	unsigned prev_space;	// address space of PSW<13:12>, for MFPI/MTPI
+	unsigned mode;			// PSW<15:14> itself, which unlike space keeps the
+							// two modes the KD11-EA does not have apart
+	unsigned prev_mode;		// PSW<13:12> itself
 	unsigned access_space;	// space the next dati()/dato() relocates through.
 							// normally == space, temporarily overridden for
 							// trap vector fetches (always kernel) and MFPI/MTPI
+	unsigned access_mode;	// and the mode it is made in
+	unsigned access_illegal;// derived: access_mode is neither kernel nor user
 	unsigned frozen;		// mmr0 & KT11D_MMR0_ABORTS: stop updating MMR0<6:1>,
 							// MMR1 and MMR2 until software clears the abort bits
+	unsigned maint;			// mmr0 & KT11D_MMR0_MAINT
+	unsigned dest_ref;		// the reference being made belongs to the destination
+							// operand. Only matters in maintenance mode
 	uint8 mmr1_count;		// # of register changes logged in mmr1 so far
 };
 
 void kt11d_reset(KT11D *mmu);
+void kt11d_init(KT11D *mmu);
 void kt11d_rebuild(KT11D *mmu, unsigned idx);
 void kt11d_rebuild_all(KT11D *mmu);
 void kt11d_set_modes(KT11D *mmu, word psw);
 int kt11d_abort(KT11D *mmu, word va, unsigned space, unsigned access);
+int kt11d_abort_mode(KT11D *mmu, word va);
 int kt11d_read_reg(KT11D *mmu, uint32 pa, word *w);
 int kt11d_write_reg(KT11D *mmu, uint32 pa, word w, word mask);
 // render MMR0..MMR2 and the PAR/PDR blocks into a multi-line string.
 // The registers are not visible on the bus, so this is the only way to see them.
 void kt11d_format(KT11D *mmu, char *buf, size_t bufsize);
+
+/* Select the address space and the processor mode the next reference is made
+ in. Normally that is the current mode, but a trap vector fetch is always made
+ in kernel mode and MFPI/MTPI make theirs in the previous mode. */
+static inline void
+kt11d_set_access(KT11D *mmu, unsigned space, unsigned mode)
+{
+	mmu->access_space = space;
+	mmu->access_mode = mode;
+	mmu->access_illegal = mode != KT11D_MODE_KERNEL && mode != KT11D_MODE_USER;
+}
 
 /* 16 -> 18 bit widening without relocation: the top 8K of the virtual space
  is the IO page. This is what the 11/20 does unconditionally. */
@@ -121,6 +145,12 @@ kt11d_unrelocated(word va)
 /* The translation itself, on the hot path of every CPU memory access.
  "access" is KT11D_READ or KT11D_WRITE.
  Result: 0 = ok and *pa valid, 1 = aborted, caller must trap through 0250.
+
+ Maintenance mode (MMR0<8>) is the second way in: with relocation itself off it
+ relocates the destination operand references of an instruction and nothing
+ else, so that a diagnostic can compare a relocated address against the
+ unrelocated one the same instruction formed for its source. It exists for
+ maintenance only - no software uses it.
  */
 static inline int
 kt11d_relocate(KT11D *mmu, word va, unsigned space, unsigned access, uint32 *pa)
@@ -128,10 +158,12 @@ kt11d_relocate(KT11D *mmu, word va, unsigned space, unsigned access, uint32 *pa)
 	kt11d_page_t *p;
 	unsigned blk;
 
-	if(!mmu->enabled){
+	if(!mmu->enabled && !(mmu->maint && mmu->dest_ref)){
 		*pa = kt11d_unrelocated(va);
 		return 0;
 	}
+	if(mmu->access_illegal)
+		return kt11d_abort_mode(mmu, va);
 	p = &mmu->page[space + (va >> 13)];
 	blk = (va >> 6) & 0177;
 	// One unsigned compare covers both expansion directions: for a page which
