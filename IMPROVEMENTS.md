@@ -135,25 +135,44 @@ menu with an ERROR instead of losing the session. Same pattern in `request_sched
 
 ## 3. Performance — CPU cores and engine
 
-### 3.1 Per-instruction ARM→PRU round trip for interrupt granting
+### 3.1 Per-instruction ARM→PRU round trip for interrupt granting — DESIGNED, awaiting in-machine tests
 
 The dominant cost of the emulated CPUs on hardware. Every single instruction does
 `unibone_grant_interrupts()` (`ka11_condstep`/`kd11ea_condstep`) →
 `mailbox_execute(ARM2PRU_ARB_GRANT_INTR_REQUESTS)`, which is: a pthread mutex, a spin
 until the PRU's main loop polls `arm2pru_req` (bounded by PRU loop latency), then a
 second spin until `ifs_intr_arbitration_pending` clears — the comment in `cpu.cpp:96`
-measures 60–80 µs for that phase. Ideas, in increasing order of ambition:
+measures 60–80 µs for that phase. With PMI (`direct_memory`) on, a whole instruction
+otherwise costs a few hundred ns, so this handshake is ~95 % of instruction time and
+the reason PMI reaches only ~0.5× real speed instead of a multiple of it.
 
-- **Skip the round trip when nothing can be granted.** The ARM side already knows
-  whether any *emulated* request is pending (`request_levels[].slot_request_mask` in
-  qunibusadapter). For *physical* cards' BR/NPR lines, let the PRU publish the raw
-  request mask (it reads buslatch 0 every loop anyway) into a mailbox byte; then
-  `unibone_grant_interrupts()` becomes one volatile read + conditional round trip.
-- **Let the PRU self-arm.** The PRU already knows the CPU priority level
-  (`ifs_priority_level`); the only information the round trip conveys is "the CPU is at
-  an instruction boundary". A single mailbox flag toggled by the ARM (set before fetch,
-  no wait) would let the PRU grant asynchronously, removing both spins entirely; the
-  existing `CPU_PRIORITY_LEVEL_FETCHING` handshake already serializes vector delivery.
+**Design (2026-07-25), to be implemented when real in-machine tests are possible:**
+
+- **Mirror the request lines into shared RAM.** `sm_arb_worker_cpu()`
+  (`pru1_statemachine_arbitration.c`) reads the BR/NPR latch (`buslatches_getbyte(1)`)
+  on every arbitration pass anyway; it additionally publishes that byte into a new
+  `mailbox.arbitrator` field each pass.
+- **Fast path on the ARM.** `unibone_grant_interrupts()` first reads the mirror — one
+  uncached shared-RAM read, ~150 ns — and performs the full
+  `ARM2PRU_ARB_GRANT_INTR_REQUESTS` handshake + spin only when a BR4..7 line is
+  actually asserted (or the CPU priority level changed since the last grant).
+  Interrupt latency semantics are unchanged: requests are still sampled at every
+  fetch boundary, exactly as now.
+- **Nothing needed for DMA.** NPR is granted by the PRU autonomously (no
+  `ifs_intr_arbitration_pending` involved), and `sm_arb_worker_device()` already
+  defers CPU memory access while arbitration is pending — the fast path only
+  concerns BR4..7 grants.
+- Emulated devices' pending requests are also visible ARM-side
+  (`request_levels[].slot_request_mask` in qunibusadapter) and can short-circuit the
+  check further.
+
+Must be verified on real hardware (physical cards asserting BR asynchronously, SACK
+timing): host-side cputest cannot exercise any of this, its `grant_interrupts()` is a
+stub. More ambitious follow-up, only if the above is not enough: **let the PRU
+self-arm** — the round trip conveys nothing but "the CPU is at an instruction
+boundary", so a mailbox flag set before fetch without any wait would let the PRU grant
+asynchronously, removing both spins; the existing `CPU_PRIORITY_LEVEL_FETCHING`
+handshake already serializes vector delivery.
 
 ### 3.2 CPU IO-page access path: mutex ping-pong and dynamic_cast in a spin loop
 
@@ -165,7 +184,7 @@ Cache `prl->active == &dma_request` as a plain flag, hoist the `dynamic_cast` (t
 request is known to be a `dma_request_c`, it was constructed as one), and consider a
 futex/condvar with the PRU event rather than a spin.
 
-### 3.3 Diagnostics scaffolding on every bus cycle
+### 3.3 Diagnostics scaffolding on every bus cycle — trace() half FIXED 2026-07-25
 
 `cpu.cpp:114-210` (`unibone_dati/dato/datob`) executes per cycle, even with all
 diagnostics off: `trigger.probe()` (a `std::vector::at()` behind two calls),
@@ -177,6 +196,12 @@ when the tracer is disabled (`cpu.cpp:235-238`) — a full varargs `trace()` →
 per instruction from the `TR`/`TRB` macros. Fold all of it behind one
 `extern bool unibone_cpu_diagnostics_active` (or function pointer swapped on enable)
 that the macros and `unibone_dati/dato` test with a single predictable branch.
+
+*Fixed for the trace() part:* `unibone_trace_enabled()` is now the "is trace output
+going anywhere at all" gate, cached once per instruction in the cores' `cpu->tracing`
+field; every hot trace site tests the flag first. Still open: `trigger.probe()`,
+`emu_step_ns()` and the `cycle_trace_buffer.active` test inside
+`unibone_dati/dato/datob`.
 
 ### 3.4 Shared DDR is (very likely) an uncached mapping — PMI pays for it
 
@@ -211,7 +236,7 @@ test run too.
 
 ## 4. Structural improvements
 
-### 4.1 The ka11/kd11ea fork needs a shared-bug discipline
+### 4.1 The ka11/kd11ea fork needs a shared-bug discipline — PARTLY ADDRESSED 2026-07-25
 
 `kd11ea.c` was forked from `ka11.c`, and both drifted: the MOV bus-error fix (1.1)
 exists only in the fork, while the mutex-reinit bug (2.1) was faithfully copied into it.
@@ -222,6 +247,13 @@ machinery, the branch/condition-code macro block, state printing). Either extrac
 identical parts into a shared `cpu_core_common` include, or add a maintenance note at
 the top of both files listing the sections that must be patched in tandem. The current
 situation has already produced one divergence bug.
+
+*Partly addressed:* the per-core `11.h` twins are merged into
+`10.02_devices/2_src/cpu_core.h`, and the dead `Bus`/`Busdev`/`svc()` scaffolding is
+deleted from both cores, shrinking the duplicated surface. The remaining plan is to
+single-source the interpreter and compile it twice (`CPU_KA11`/`CPU_KD11EA`), turning
+the documented family differences into explicit `#if` islands — deferred until the
+KT11-D diagnostics pass, so the merge is a diff of two stable texts.
 
 ### 4.2 ka11.c exports generic symbol names into a mixed binary — FIXED 2026-07-25
 
