@@ -90,11 +90,18 @@ void unibone_grant_interrupts(void)
     // after that the CPU should check for received INTR vectors
     // in its microcode service() step.c
     // allow PRU do to produce GRANT for device requests
-    mailbox_execute (ARM2PRU_ARB_GRANT_INTR_REQUESTS);
-    // Block CPU thread
+    if (!mailbox_execute (ARM2PRU_ARB_GRANT_INTR_REQUESTS))
+        return; // PRU not responding, reported by mailbox_execute()
+    // Block CPU thread, often 60-80 us of idle spinning.
+    // Bounded: if the PRU is stopped or restarted mid-instruction, an
+    // unbounded spin would hang the CPU worker thread beyond recovery.
+    uint64_t starttime_ns = timeout_c::abstime_ns();
     while (mailbox->arbitrator.ifs_intr_arbitration_pending) {
-// often 60-80 us, So just idle loop the CPU thread
-//		timeout_c::wait_us(1);
+        if (timeout_c::abstime_ns() - starttime_ns > 100000000ull) {
+            logger->log(unibone_cpu, LL_ERROR, false, __FILE__, __LINE__,
+                        "unibone_grant_interrupts(): PRU arbitration pending for >100ms - PRU stopped or hung?");
+            return;
+        }
     }
 }
 

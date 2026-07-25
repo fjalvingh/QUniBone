@@ -95,7 +95,7 @@ mysteriously stops taking interrupts after a reboot. Related: the mutex is never
 Fix: initialize the mutex once when the core object is created and never touch it in
 `*_reset()`; clearing `external_intr` there should be done under the lock.
 
-### 2.2 unibone_grant_interrupts() and mailbox_execute() can spin forever
+### 2.2 unibone_grant_interrupts() and mailbox_execute() can spin forever — FIXED 2026-07-25
 
 `cpu.cpp:88-99` busy-waits on `mailbox->arbitrator.ifs_intr_arbitration_pending` and
 `mailbox.cpp:111-136` busy-waits on `arm2pru_req`, both with no timeout and no exit
