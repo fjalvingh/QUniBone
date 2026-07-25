@@ -147,17 +147,33 @@ kt11d_relocate(KT11D *mmu, word va, unsigned space, unsigned access, uint32 *pa)
 	return 0;
 }
 
-/* called before every opcode fetch: MMR2 holds the address of the instruction,
- MMR1 the register changes of the instruction being executed. Both are frozen
- after an abort, so that the abort handler can undo the instruction. */
+/* called before every opcode fetch: MMR1 logs the register changes of the
+ instruction about to be executed, so it starts empty. Frozen after an abort, so
+ that the abort handler can undo the instruction.
+ MMR2 is deliberately not touched here - see kt11d_instruction_fetched(). */
 static inline void
-kt11d_instruction_start(KT11D *mmu, word pc)
+kt11d_instruction_start(KT11D *mmu)
+{
+	if(mmu->frozen)
+		return;
+	mmu->mmr1 = 0;
+	mmu->mmr1_count = 0;
+}
+
+/* called once the opcode fetch has succeeded, with the address it was made
+ from: MMR2 holds the address of the instruction being executed.
+ It is a separate step because MMR2 "is loaded with the 16-bit virtual address
+ at the beginning of each instruction fetch, but is not updated if the
+ instruction fetch is aborted" (PDP-11 Architecture Handbook). An aborted fetch
+ therefore leaves MMR2 pointing at the previous instruction. MAINDEC DFKTF-A
+ checks exactly that: it runs off the end of a page and expects MMR2 to address
+ the last instruction inside it, not the one that could not be fetched. */
+static inline void
+kt11d_instruction_fetched(KT11D *mmu, word pc)
 {
 	if(mmu->frozen)
 		return;
 	mmu->mmr2 = pc;
-	mmu->mmr1 = 0;
-	mmu->mmr1_count = 0;
 }
 
 /* log an autoincrement/autodecrement of a register into MMR1.

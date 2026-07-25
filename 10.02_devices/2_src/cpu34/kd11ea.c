@@ -433,6 +433,7 @@ step(KD11EA *cpu)
 	uint src, dst, sf, df, sm, dm;
 	word mask, sign;
 	int inhov;
+	int in_trap;	// the trap sequence is running, not an instruction
 	word oldpsw;	// 16 bits since the KT11-D added the mode fields
 	word trapped_pc, trapped_psw, newpc, newpsw;	// used by the trap sequence
 	uint reg;
@@ -482,7 +483,12 @@ step(KD11EA *cpu)
 #define BR	PC += br
 #define CBR(c)	if(((c)>>(cpu->psw&017)) & 1) BR
 #define PUSH	SP -= 2; if(!inhov && IS_KERNEL(cpu) && (SP&~0377) == 0) cpu->traps |= TRAP_STACK
-#define POP	SP += 2
+// A pop is an autoincrement of SP like any other, and is undone the same way if
+// the read it computed the address for aborts - see autoinc_pending(). Every
+// POP here is immediately followed by the read, which either commits it or
+// backs it out. MAINDEC DFKTF-A relies on it: it RTIs into a user stack on a
+// non-resident page and, after the abort, expects the user SP unchanged.
+#define POP	SP += 2; autoinc_pending(cpu, 6, 2)
 // force the address space of the next dati()/dato(): trap vector fetches and
 // the trap pushes are always kernel references, MFPI/MTPI use the previous mode
 #define SPACE(s)	cpu->mmu.access_space = (s)
@@ -494,6 +500,7 @@ step(KD11EA *cpu)
 #define TRB(m)	if (cpu->tracing && unibone_trace_addr(PC-2)) trace("EXEC [%06o] "#m"%s\n", PC-2, by ? "B" : "")
 
 	inhov = 0;
+	in_trap = 0;
 
 	// external interrupt from parallel threads? The unlocked read is the
 	// fast path: the flag is only ever raised by the other thread, so a
@@ -513,13 +520,14 @@ step(KD11EA *cpu)
 	}
 
 	oldpsw = PSW;
-	// MMR2 latches the address of this instruction, MMR1 starts empty.
-	// Both stay frozen while MMR0 holds an abort.
-	kt11d_instruction_start(&cpu->mmu, PC);
+	// MMR1 starts empty; MMR2 latches the address of this instruction only once
+	// the fetch below has succeeded. Both stay frozen while MMR0 holds an abort.
+	kt11d_instruction_start(&cpu->mmu);
 	// whatever the last instruction autoincremented is committed: an abort
 	// of this fetch may not undo it
 	autoinc_commit(cpu);
 	INA(PC, cpu->ir);
+	kt11d_instruction_fetched(&cpu->mmu, PC);
 	PC += 2;	/* don't increment on bus error! */
 	by = !!(cpu->ir&B15);
 	br = sxt(cpu->ir)<<1;
@@ -1072,10 +1080,20 @@ be:	if(cpu->be > 1){
 		return;
 	}
 	trace("bus error at %06o\n", cpu->ba);
+	/* An instruction loads its condition codes when it completes, so one that
+	   aborted never loads them: the PSW pushed by the trap below holds the
+	   codes from before it. MAINDEC DFKTF-A checks this with `SEC` followed by
+	   an `ADC` whose destination is on a read-only page, and expects C still
+	   set in the pushed PSW - our ADC had already cleared it, computing 0+C.
+	   The trap sequence is not an instruction: an abort inside one must leave
+	   the handler's freshly loaded PSW alone. */
+	if(!in_trap)
+		PSW = (PSW & ~017) | (oldpsw & 017);
 	// 4 for a bus timeout or an odd address, 0250 for an MMU abort
 	TRAP(cpu->trap_vector);
 
 trap:
+	in_trap = 1;
 	if (cpu->tracing && unibone_trace_addr(PC-2))
 		trace("TRAP %o\n", TV);
 	trapped_pc = PC;

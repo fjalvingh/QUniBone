@@ -12,6 +12,43 @@ contract to the QUNIBUS adapter is `../cpu_bus_adapter.h`.
 
 ## Unreleased
 
+### MMU aborts: three defects found by FKTFA0
+
+`FKTFA0`, the MMU abort tape, halted after 332 instructions. Three defects, each uncovered by fixing
+the one before it; the tape now runs clean (2931203 instructions per pass). All three are about what
+an aborted reference must *not* leave behind — the machine has to look as if the aborted instruction
+never started, so that the handler can restart it.
+
+- **A pop was not backed out when its read aborted.** `POP` in `kd11ea.c` was a bare `SP += 2`, so an
+  `RTI` whose first pop aborted left `SP` two higher, and the tape — which `RTI`s into a user stack
+  on a non-resident page and then reads the user `SP` back with `MFPI SP` — saw 040102 instead of
+  040100. A pop is an autoincrement of `SP` like any other, so `POP` now registers it with
+  `autoinc_pending()`, the machinery added for `TSTB (R0)+` in the FKABD1 round below, which the
+  `dati()`/`dato()` abort paths already undo. Every `POP` is immediately followed by the read that
+  commits or backs it out, so `RTS`, `MARK` and `MTPI` are covered by the same change.
+- **MMR2 was updated by an instruction fetch that aborted.** `kt11d_instruction_start()` stored the
+  PC before the fetch, so running off the end of a page left MMR2 addressing the instruction that
+  could *not* be fetched. MMR2 "is loaded with the 16-bit virtual address at the beginning of each
+  instruction fetch, but is not updated if the instruction fetch is aborted" (PDP-11 Architecture
+  Handbook): the tape plants a `SOB` in the last word of a page and expects MMR2 to hold *its*
+  address, 016676, not the 016700 it could not reach. Setting MMR2 is now the separate
+  `kt11d_instruction_fetched()`, called once the fetch has succeeded; `kt11d_instruction_start()`
+  keeps clearing MMR1, which is right either way — an instruction that never started changed no
+  registers.
+- **An aborted instruction loaded its condition codes.** The codes are loaded when an instruction
+  completes, so the PSW pushed by the abort trap must hold the ones from before it. The tape does
+  `SEC` and then an `ADC` whose destination is on a read-only page: our `ADC` computed 0 + C, cleared
+  C as it went and pushed 000000 where the tape expects 000001. The `be:` path now restores PSW<3:0>
+  from the value saved at instruction start. The trap sequence is excluded by the new `in_trap`
+  flag — it is not an instruction, and an abort inside one must leave the handler's freshly loaded
+  PSW alone.
+
+`FKTBA0` and `FKAAC0` still pass but take a different number of instructions per pass than before
+(4573156 and 10888), since they too run code down these paths.
+
+Verified: cross-compile plus the full cputest run — 33 of 36 runs pass, `FKTAA0` and `FKTHB0`
+unchanged, 1 skipped. Not run on real hardware.
+
 ### RESET no longer re-initializes the interrupt mutex
 
 `kd11ea_reset()` ran on every RESET opcode (i.e. at every OS boot) and did
