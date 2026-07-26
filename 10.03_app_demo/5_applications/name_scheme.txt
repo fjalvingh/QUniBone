@@ -1,0 +1,81 @@
+
+Naming of the example applications
+==================================
+
+One directory per example, one script per way of running it.
+
+
+Directories
+-----------
+<OS>.<boot medium>		rt11.rl02, unixv6.rk05, rsx11.mscp, rt11.rx01
+
+The medium is the drive the example boots from, not the controller: rl02, rk05,
+rx01, rx02, mscp. Directories without a medium hold something else: "cpu" the
+emulated PDP-11/20, "memory" the memory emulation, "m9312" the boot ROM,
+"unixv1" the single UNIX V1 setup.
+
+
+Scripts
+-------
+<OS><version>[_<pdp11-model>].<boot device><unit>.sh
+
+	rt11v5.5.dlx.sh
+	rt11v5.5_34.dlx.sh
+	xxdp22-25.dlx.sh
+
+A script is no longer a shell wrapper around a .cmd file - there is no .cmd file
+any more. The script IS the demo command file and starts with
+
+	#!/root/10.03_app_demo/4_deploy/demo --verbose
+
+so it runs as "sudo ./rt11v5.5.dlx.sh", with further options if wanted. demo
+ignores the "#!" line as it ignores any line starting with "#". The images and
+listings the script names are looked up next to the script, so no "cd" and no
+absolute paths are needed. Files the run creates land in the directory it was
+started from.
+
+<OS><version>	rt11v5.5, rsx11m4.8, unixv6, xxdp22-25, mini-unix, 211BSD.
+		A script that serves two versions names both: xxdp22-25.
+<pdp11-model>	The PDP-11 the setup is for, when it matters: _34, _44, _84,
+		_05, _20. Omitted when the setup is model independent.
+<boot device>	The DEC bootstrap mnemonic of the drive booted from, which is
+		also the name of the bootloader listing the script deposits:
+			dl	RL11 / RL01, RL02	dl.lst
+			dk	RK11 / RK05		dk.lst
+			du	MSCP (UDA50, RA..)	du.lst
+			dx	RX11 / RX01		dx.lst
+			dy	RX211 / RX02		dy.lst
+<unit>		The drive number booted from: dl0, dl1, du0, ...
+		"x" when the script mounts several units and leaves the choice
+		to the operator: a script for a real PDP-11 cannot start the
+		CPU, it only installs the bootloader and prints the start
+		addresses (10000 for unit 0, 10010 for unit 1, ...). So
+		rt11v5.5.dlx.sh serves DL0 and DL1 and is one file, where there
+		used to be an identical rt11v5.5fb_dl0.sh and rt11v5.5sj_dl1.sh.
+
+Suffix "_shared" instead of a unit: the drive is not an image file but a shared
+host directory, exposed as a DEC filesystem (rt11v5.5_dl_shared.sh).
+
+Most scripts still carry the older form, <OS>_<boot device><unit>_<pdp11-model>
+(rsx11m4.1_dl0_34.sh, unixv6_dk0_34.sh, 211BSD_du0_44.sh); they get the name
+above when they are next revised.
+
+
+Images
+------
+<OS><version>[_<content>][_<pdp11-model>].<medium>
+
+	rt11v5.5.rl02			system disk
+	rt11v5.5_games.rl02		second volume, by content
+	rt11v5.5_34.rl02		built for a PDP-11/34
+	rsx11m4.1_hlpdcl.rl02		help and DCL volume
+	rsx11m4.1_excprv.rl02
+
+Only the compressed copy of an image needs to be kept: when demo cannot open
+the image it names, it looks for "<image>.gz" next to the script and expands it
+with zcat. The expanded copy is written to the directory the script was started
+from, not next to the script, and is used from there on every further run.
+
+scratchN.<medium> is an empty scratch volume. It is taken from next to the
+script when one is there, and otherwise created in the directory the script was
+started from.
