@@ -31,10 +31,6 @@ TAPE_DIR = $(abspath ../3_tapes)
 OBJDIR = $(abspath ../4_deploy)
 STAMPDIR = $(OBJDIR)/stamps
 
-# The 11/20 instruction set diagnostics vendored with Angelo Papenhoff's
-# emulator. Both cores are expected to pass all of them.
-VENDOR_MAINDEC_DIR = $(DEVICE_SRC_DIR)/cpu20/pdp11-master/maindec
-
 PROG = $(OBJDIR)/cputest
 
 HOST_CXX ?= g++
@@ -90,7 +86,7 @@ OBJECTS = $(HARNESS_OBJECTS) $(CORE_OBJECTS)
 TAPE_EXTENSIONS = BIN BIC
 tapes_in = $(foreach e,$(TAPE_EXTENSIONS),$(wildcard $(1)/*.$(e)))
 
-BOTH_TAPES = $(sort $(wildcard $(VENDOR_MAINDEC_DIR)/ZKA*.BIN) $(call tapes_in,$(TAPE_DIR)/both))
+BOTH_TAPES = $(sort $(call tapes_in,$(TAPE_DIR)/both))
 CPU20_TAPES = $(sort $(call tapes_in,$(TAPE_DIR)/cpu20))
 CPU34_TAPES = $(sort $(call tapes_in,$(TAPE_DIR)/cpu34))
 

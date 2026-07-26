@@ -244,9 +244,9 @@ array plus KL11/KW11 register stubs. Nothing in the cores needs changing to be t
 
 Adding tapes needs no code change: drop images into `10.05_cputest/3_tapes/both|cpu20|cpu34/` and
 they are picked up by wildcard. **Both `.BIN` and `.BIC` are matched** — the same absolute loader
-format, named differently by paper tape archives and by XXDP distributions. The 13 vendored 11/20
-diagnostics ZKAAA0…ZKAMA0 are wired in from `10.02_devices/2_src/cpu20/pdp11-master/maindec/` and
-run against both cores. Per-tape settings go in a `<tape>.opt` sidecar.
+format, named differently by paper tape archives and by XXDP distributions. `3_tapes/` is the whole
+inventory — the 13 11/20 diagnostics ZKAAA0…ZKAMA0 that came with the vendored `cpu20` upstream live
+in `both/` like any other tape. Per-tape settings go in a `<tape>.opt` sidecar.
 
 The loader (`papertape.cpp`) works byte by byte, not word by word: a block may carry an odd number
 of data bytes or start at an odd address, which the XXDP images do and which upstream's `loadpt()`

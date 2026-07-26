@@ -11,10 +11,12 @@ are usually named, and `.BIC`, as the XXDP distributions name them.
 | `cpu20/` | the KA11 (PDP-11/20) core only |
 | `cpu34/` | the KD11-EA (PDP-11/34) core only |
 
-The 13 PDP-11/20 instruction set diagnostics **ZKAAA0 … ZKAMA0** are also wired
-in, from where they are vendored at
-`10.02_devices/2_src/cpu20/pdp11-master/maindec/`, and are run against both
-cores. They do not need to be copied here.
+Every tape the suite runs lives here; there is no second source. The 13 PDP-11/20
+instruction set diagnostics **ZKAAA0 … ZKAMA0** in `both/` came with Angelo
+Papenhoff's emulator (<https://github.com/aap/pdp11>), which the `cpu20` core is
+derived from, and used to be run out of its vendored copy at
+`10.02_devices/2_src/cpu20/pdp11-master/maindec/`. They were moved here so that
+this directory is the whole inventory.
 
 ## Test results
 
@@ -27,7 +29,7 @@ does not, it says what the run is seen to exercise.
 
 | tape | what it tests | cpu20 | cpu34 |
 |---|---|---|---|
-| `ZKAAA0` … `ZKAMA0` (13 tapes) | MAINDEC-11-DZKAA … DZKAM, the PDP-11/20 instruction set tests. No banner text; vendored with the 11/20 core | **PASS** (13/13) | **PASS** (13/13) |
+| `both/ZKAAA0` … `ZKAMA0` (13 tapes) | MAINDEC-11-DZKAA … DZKAM, the PDP-11/20 instruction set tests. No banner text; they came with the 11/20 core | **PASS** (13/13) | **PASS** (13/13) |
 | `cpu34/FKAAC0` | MAINDEC-11-DFKAA-C, "11/34 BSC INST TST" — basic instruction set | — | **PASS** (10888 instructions) |
 | `cpu34/FKABD1` | MAINDEC-11-DFKAB-D, "11/34 TRAPS TST" — trap vectors, trap-within-trap, the kernel stack limit, the reserved instructions, interrupt priority and the WAIT | — | **PASS** (319027 instructions) |
 | `cpu34/FKACA0` | MAINDEC-11-DFKAC-A, no banner — EIS (MUL/DIV/ASH/ASHC) and MFPS/MTPS exerciser | — | **PASS** (4847 instructions) |
