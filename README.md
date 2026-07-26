@@ -16,6 +16,12 @@ Source files special to only one bus are marked with suffix "_u" respective "_q"
 
 See project pages at retrocmp.com [for UniBone](http://retrocmp.com/projects/unibone/) and [for QBone](http://retrocmp.com/projects/qbone/)
 
+## Using the software
+
+See the [manual](manual/README.md): how the `demo` application is started, its command line and
+command scripts, its menus, and a page for every emulated device with its registers, its default
+bus parameters and every option it accepts.
+
 ## Compiling, editing, deploying
 
 See the document [COMPILING.md](COMPILING.md).

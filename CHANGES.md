@@ -2,6 +2,39 @@
 
 Notable changes to QUniBone, newest first.
 
+### A manual for `demo` and every emulated device
+
+`manual/` is a new directory of Markdown pages describing how the application is used. Until now the
+only description of the menus was the menus themselves, and the only description of a device's
+parameters was the `info` string each one carries, visible with `p` once the device is enabled —
+which is of no help when deciding what to enable in the first place.
+
+- `manual/README.md` is the root page and documents `demo` alone: how it is started, its command
+  line options, the command file (`#!` script) format and its `.wait`/`.print`/`.ifeq`/`.input`/
+  `.end` directives, and the command list of every menu — main, device (`d`/`dc`), bus
+  master/memory (`tm`/`m`) and the hardware test menus. It ends with an index linking to all
+  device pages.
+- One page per device, from `rl11.md` to `blinkenbone.md`: what the hardware is, its bus registers
+  and their offsets, its DEC default address/slot/vector/level, every parameter it accepts with
+  type, access and meaning, and a worked `en`/`sd`/`p` sequence with a pointer to the matching
+  example in `5_applications`. UNIBUS-only devices (M9312, KE11, the CPUs) and the `_u`/`_q`
+  variants of a controller (RL11/RLV11/RLV12, RK11/RKV11, RX11/RXV11, RX211/RXV21) are marked as
+  such.
+- Three shared pages hold what would otherwise be repeated on twenty pages:
+  `common-parameters.md` (the `device_c` and `qunibusdevice_c` parameters every device has),
+  `storage-drives.md` (`image`, `shared_dir`, `shared_filesystem` and the `.gz` expansion rule) and
+  `emulated-cpu.md` (the front-panel-switch parameters, breakpoint and cycle trace of the CPU
+  emulations).
+
+Documented along the way, because it costs a mounted disk: `p <param>` on a *writable string*
+parameter sets it to the empty string, so `p image` unmounts the medium instead of showing it —
+`menu_devices.cpp` parses `""` into the parameter before printing it. Plain `p` is the safe way to
+read one.
+
+**Verified**: documentation only, no code changed. Every statement was taken from the sources
+(`application.cpp`, `menus.cpp`, `menu_*.cpp`, `inputline.cpp`, and each device's constructor and
+header); all inter-page links were checked to resolve.
+
 ### The example applications are in the repository, and share their disks
 
 `10.03_app_demo/5_applications` — the ready-made setups that boot RT-11, RSX-11M, UNIX V6, 2.11BSD,
