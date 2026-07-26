@@ -14,14 +14,14 @@ en uda			# enable UDA50 controller
 en uda0			# enable drive #0
 sd uda0			# select
 p type RA70
-p image rsx11m_4_8_bl70.dsk  # mount image
+p image ../diskimages/rsx11m_4_8_bl70.ra70.dsk  # mount image
 p useimagesize	1
 
 # mount test disk in MSCP drive #1
 en uda1			# enable drive #1
 sd uda1			# select
 p type RA70
-p image rsxm70.dsk      # mount image
+p image ../diskimages/rsxm70.ra70.dsk      # mount image
 p useimagesize	1
 
 
