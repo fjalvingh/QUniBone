@@ -9,6 +9,7 @@ compile_commands.json
 crosscompile.env
 **/4_deploy_u/**
 10.05_cputest/4_deploy/
+90_common/4_deploy/
 *.log
 *.swp
 91_3rd_party/**

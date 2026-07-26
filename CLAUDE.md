@@ -92,13 +92,14 @@ This is the key thing to understand before touching bus-timing or device-registe
 
 The software targets BeagleBone hardware — it does not build or run on a generic desktop Linux box
 (it depends on the PRU subsystem, `prussdrv`, and BeagleBone GPIO/pinmux). There is no CI, and for
-everything except the CPU emulation cores verification happens by running the `demo` binary
-interactively on real UniBone/QBone hardware. There are two ways to build it, below: directly on the
-BBB, or cross-compiled from an x64 host.
+everything except the parts covered by the two test suites below verification happens by running the
+`demo` binary interactively on real UniBone/QBone hardware. There are two ways to build it, below:
+directly on the BBB, or cross-compiled from an x64 host.
 
-The one exception to "verify on real hardware" is the **CPU emulation core test suite** in
-`10.05_cputest/`, which runs on the build machine (host-native either way, see that section) as part
-of every `./compile.sh` and `./crossco` — see the section below.
+The exceptions to "verify on real hardware" are the **CPU emulation core test suite** in
+`10.05_cputest/` and the **shared utility tests** in `90_common/test/`. Both run on the build machine
+(host-native either way, see those sections) as part of every `./compile.sh` and `./crossco`, and
+both are skipped by `SKIP_CPUTESTS=1` / `./crossco -n` — see the sections below.
 
 ### On UniBone/QBone hardware
 
@@ -199,9 +200,10 @@ into that bus's `makefile_u`/`makefile_q` instead (`PLATFORM_OBJECTS` plus a rul
 
 ## CPU emulation core tests (`10.05_cputest`)
 
-The only automated tests in the tree. They run the MAINDEC instruction diagnostics against the CPU
-emulation cores on the build machine, with no BeagleBone and no backplane involved, and both
-`./compile.sh` and `./crossco` run them after a successful build.
+One of the two automated test suites in the tree (the other is `90_common/test`, below). They run the
+MAINDEC instruction diagnostics against the CPU emulation cores on the build machine, with no
+BeagleBone and no backplane involved, and both `./compile.sh` and `./crossco` run them after a
+successful build.
 
 > **The build is green.** The 26 PDP-11/20 runs (13 tapes × 2 cores) pass, as do the nine XXDP
 > 11/34 diagnostics `FKAAC0`/`FKABD1`/`FKACA0`/`FKTAA0`/`FKTBA0`/`FKTCA0`/`FKTDA1`/`FKTFA0`/`FKTHB0`
@@ -255,6 +257,30 @@ rejected as a "paper tape botch".
 Coverage: ZKA\* covers the 11/20 base instruction set on both cores. The 11/34 specifics — EIS,
 MFPS/MTPS, the KT11-D — are covered by the XXDP `FKA*`/`FKT*` tapes in `3_tapes/cpu34/`, which are
 wired in and pass except for the one KT11-D tape named in the warning above.
+
+## Shared utility tests (`90_common/test`)
+
+The second automated test suite: unit tests for the target-independent utilities of `90_common/src`,
+built and run by the host compiler exactly like the CPU core tests, and run by `./compile.sh` and
+`./crossco` right before them (they take milliseconds, so a regression there aborts the build before
+the much longer CPU runs). Same skip switch, `SKIP_CPUTESTS=1` / `./crossco -n`.
+
+Currently one binary: `getopt2test` from `getopt2_test.cpp`, covering the commandline parser
+`90_common/src/getopt2.cpp` — the ordinary option forms, the error statuses, and the argument orders
+that arise when `demo` is used as a `#!` script interpreter (script name in front of the user's
+options; the whole tail of the `#!` line arriving as one single `argv[1]`). Two phases: a table of
+commandlines checked against the trace the parser must produce, then the same for real — the test
+binary writes a `#!` script naming *itself* as interpreter, runs it, and checks what the child
+reports, which is the only way to cover what the kernel actually hands over. Those script cases
+report SKIP (not FAIL, exit code still 0) if the environment refuses to execute the script.
+
+- The option set of `demo` is *replicated* in `getopt2_test.cpp` — `application.cpp` cannot be linked
+  on the host, it pulls in the PRU/GPIO/logger stack. Adding or changing a `demo` option means
+  updating `demo_opts[]` there too; only the declared argument counts matter for parsing.
+- Adding a unit test: drop `<unit>_test.cpp` next to the existing one and add `<unit>` to `TESTS` in
+  `90_common/test/makefile`. The pattern rules build `4_deploy/<unit>test` from it plus
+  `../src/<unit>.cpp`; a stamp per test binary means an unrelated build re-runs nothing.
+- Run it by hand for the full case list: `90_common/4_deploy/getopt2test -v`.
 
 ## Change log
 

@@ -2,6 +2,54 @@
 
 Notable changes to QUniBone, newest first.
 
+### Command line options now work when `demo` is used as a script interpreter
+
+`demo` accepts a command file as a plain argument (and then chdirs to its directory), which makes a
+command file executable by giving it a `#!/path/to/demo` first line — the `#!` is ignored when the
+file is read back, since `#` starts a comment. But no option could be combined with that: the
+commandline parser rejected every such invocation. Two defects in `90_common/src/getopt2.cpp`:
+
+- The non-option arguments were parsed to the end of the commandline, swallowing any `-option`
+  behind them. So `demo script -v` — the argument order the kernel produces for `./script -v` —
+  failed with "More than 1 non-option arguments". The non-option group now ends at the next
+  `-option`, which is then parsed normally.
+- An option with a *fixed* argument count still scanned ahead to the next `-option` and took
+  everything up to it, so `demo -v script -dbg` (the form `#!/path/to/demo -v` yields) failed with
+  "More than 0 arguments for option verbose". Options with a fixed count now take exactly that many
+  arguments and let non-option args follow. Options with *optional* args keep the old greedy
+  behaviour, whose deliberate ambiguity error the code documents.
+- Linux passes everything behind the interpreter on a `#!` line as one single argument, so
+  `#!/path/to/demo -v -dbg` arrived as one `argv[1]` `"-v -dbg"` and drew "Undefined option".
+  `getopt_c::first()` now splits that bundle into words — only `argv[1]`, and only when it starts
+  with a dash, so filenames and argument values containing spaces are untouched.
+
+Naming a command file twice (`demo a --cmdfile b`) silently used the last one; it is now an error
+(`10.03_app_demo/2_src/application.cpp`). The `--help` output documents the script form and gained
+an example for it; it had no mention of either before.
+
+**A second automated test suite**, `90_common/test/`, now covers the parser, since `90_common` is
+target independent and can be tested on the build machine just like the CPU cores of
+`10.05_cputest`: `getopt2_test.cpp` holds 45 cases — the ordinary option forms, the error statuses,
+the `#!` argument orders, and the cases that must *not* change (a file name with a space, an option
+value with a space, no splitting behind `argv[1]`). 40 are table-driven parses; the other 5 are real
+script runs, where the test binary writes a `#!` script naming itself as interpreter, executes it,
+and checks what the child reports — the only way to cover what the kernel actually passes. Those 5
+report SKIP rather than FAIL if the environment will not execute the script.
+`90_common/test/makefile` builds and runs it with the host compiler, one stamp per test binary, and
+`./compile.sh`/`./crossco` run it just before the CPU core tests; `SKIP_CPUTESTS=1` / `./crossco -n`
+skips both. Adding a test for another `90_common` unit means one entry in `TESTS` there.
+
+**Verified**: cross-compile only (`./crossco`, UNIBUS), no hardware run. All 45 parser cases pass,
+and 17 of them — including 4 of the 5 real script runs — fail against the pre-fix `getopt2.cpp`,
+which is what makes them a regression test rather than a description of the current behaviour; the
+other 28 pass before and after, pinning down that the ordinary invocations are unaffected. A
+deliberately wrong expectation was checked to fail the build (`./crossco` exits 1, before the CPU
+tests run), and a read-only directory to produce SKIP with exit code 0. `./compile.sh` got the same
+two-line change but cannot run on this host (no `qunibone-platform.env`), so it is syntax-checked
+only. Beyond the test suite, an end-to-end harness over the real `getopt2.cpp` + `inputline.cpp`
+confirmed the whole path an executable command file takes: `#!` line skipped as a comment, chdir
+landing in the script's directory, options from both the `#!` line and the invocation in effect.
+
 ### CPU emulation cores: per-instruction overhead cut, dead bus abstraction removed, one shared header
 
 The emulated CPUs paid for machinery they never used on every single instruction. Three sources of

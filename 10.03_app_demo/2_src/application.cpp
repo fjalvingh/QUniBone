@@ -111,6 +111,15 @@ void application_c::help()
     std::cout << "sudo ./" PROGNAME "\n";
     std::cout << "    Show interactive menus.\n";
     std::cout << "\n";
+    std::cout << "sudo ./" PROGNAME " testseq --verbose\n";
+    std::cout << "    Execute the commands in file \"testseq\", with verbose output.\n";
+    std::cout << "    Options may also precede the command file name.\n";
+    std::cout << "\n";
+    std::cout << "A command file can be made executable by starting it with a \"#!\" line:\n";
+    std::cout << "    #!/home/pi/10.03_app_demo/4_deploy/" PROGNAME " --verbose\n";
+    std::cout << "and is then run as \"sudo ./testseq\", optionally with further options.\n";
+    std::cout << "The \"#!\" line itself is ignored, as any line starting with \"#\".\n";
+    std::cout << "\n";
 
     exit(1);
 }
@@ -193,7 +202,13 @@ void application_c::parse_commandline(int argc, char **argv)
     //                      "simple sets both mandatory int args", "1 2 hello",
     //                      "Sets integer args and option string arg");
 
-    getopt_parser.define("", "", "cmdfile", "", "", "File with statements", "Lines", "testseq", "", "");
+    getopt_parser.define("", "", "cmdfile", "", "",
+                         "File from which commands are read, like --cmdfile, but the\n"
+                         "current directory is changed to the one holding <cmdfile>, so\n"
+                         "paths inside it are relative to the file itself.\n"
+                         "Allows use as \"#!\" script interpreter.\n"
+                         "Options may be given before and after <cmdfile>.", "testseq",
+                         "read commands from file \"testseq\" and execute line by line", "", "");
 
 //	if (argc < 2)
 //		help(); // at least 1 required
@@ -207,6 +222,9 @@ void application_c::parse_commandline(int argc, char **argv)
         } else if (getopt_parser.isoption("debug")) {
             logger->default_level = LL_DEBUG;
         } else if (getopt_parser.isoption("cmdfile")) {
+            if (!opt_cmdfilename.empty())
+                commandline_option_error((char *)"Command file already set to \"%s\"",
+                                         opt_cmdfilename.c_str());
             if (getopt_parser.arg_s("cmdfilename", opt_cmdfilename) < 0)
                 commandline_option_error(NULL);
 #if defined(QBUS)
@@ -246,6 +264,9 @@ void application_c::parse_commandline(int argc, char **argv)
         //         std::cout << ", soptarg=" << s;
         //     std::cout << "\n";
         } else if(getopt_parser.isoption("")) {                 // Non-option?
+            if (!opt_cmdfilename.empty())
+                commandline_option_error((char *)"Command file already set to \"%s\"",
+                                         opt_cmdfilename.c_str());
             if (getopt_parser.arg_s("cmdfile", opt_cmdfilename) < 0) {
                 commandline_option_error(NULL);
             } else {
