@@ -13,6 +13,12 @@
 
 *.dsk
 
+# One compressed master is excluded as well: 300 MB, over the 100 MB limit
+# GitHub enforces on a single file, and it does not compress further. It is the
+# DECUS data disk on uda1 of the RSX11M-PLUS example, not the disk that example
+# boots from. See diskimages/rsx11mpv4.6_du1_84.ra80.dsk.gz.txt.
+diskimages/rsx11mpv4.6_du1_84.ra80.dsk.gz
+
 # Not ignored, and not images: the papertape and absolute-loader programs
 # (*.ptap, *.abs), the MACRO-11 sources and listings (*.mac, *.lst), the SimH
 # configurations (*.simh*, *.ini) and the reference URLs - all small and all

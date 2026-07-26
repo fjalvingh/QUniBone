@@ -14,6 +14,11 @@ rx01, rx02, mscp. Directories without a medium hold something else: "cpu" the
 emulated PDP-11/20, "memory" the memory emulation, "m9312" the boot ROM,
 "unixv1" the single UNIX V1 setup.
 
+An example directory holds only what belongs to the setup: its scripts, the
+bootloader and ROM listings (*.lst) it deposits, a MACRO-11 source, a papertape
+(*.ptap, *.abs), a SimH configuration for comparison. No disk images - those all
+live in "diskimages", see below.
+
 
 Scripts
 -------
@@ -29,10 +34,10 @@ any more. The script IS the demo command file and starts with
 	#!/root/10.03_app_demo/4_deploy/demo --verbose
 
 so it runs as "sudo ./rt11v5.5.dlx.sh", with further options if wanted. demo
-ignores the "#!" line as it ignores any line starting with "#". The images and
-listings the script names are looked up next to the script, so no "cd" and no
-absolute paths are needed. Files the run creates land in the directory it was
-started from.
+ignores the "#!" line as it ignores any line starting with "#". A file the
+script names is looked up next to the script, so no "cd" and no absolute paths
+are needed: a listing as "dl.lst", an image as "../diskimages/<image>". Files
+the run creates land in the directory it was started from.
 
 <OS><version>	rt11v5.5, rsx11m4.8, unixv6, xxdp22-25, mini-unix, 211BSD.
 		A script that serves two versions names both: xxdp22-25.
@@ -63,19 +68,69 @@ above when they are next revised.
 
 Images
 ------
-<OS><version>[_<content>][_<pdp11-model>].<medium>
+All disk, floppy and tape images live in ONE directory, "diskimages", and every
+script reaches them by the same relative path:
 
-	rt11v5.5.rl02			system disk
-	rt11v5.5_games.rl02		second volume, by content
-	rt11v5.5_34.rl02		built for a PDP-11/34
-	rsx11m4.1_hlpdcl.rl02		help and DCL volume
-	rsx11m4.1_excprv.rl02
+	p image ../diskimages/rt11v5.5.rl02.dsk
 
-Only the compressed copy of an image needs to be kept: when demo cannot open
-the image it names, it looks for "<image>.gz" next to the script and expands it
-with zcat. The expanded copy is written to the directory the script was started
-from, not next to the script, and is used from there on every further run.
+They used to sit next to the script that mounts them, which meant the same disk
+was kept two or three times over - the XXDP 2.5 volume existed three times, the
+UNIX V1 disks twice. One directory means one copy, and a new example costs no
+image it can share.
 
-scratchN.<medium> is an empty scratch volume. It is taken from next to the
-script when one is there, and otherwise created in the directory the script was
-started from.
+	<OS><version>[_<content>][_<pdp11-model>].<medium>.dsk[.gz]
+
+	rt11v5.5.rl02.dsk.gz		system disk
+	rt11v5.5_games.rl02.dsk.gz	second volume, named by content
+	rt11v5.5_games_34.rl02.dsk.gz	the same, built for a PDP-11/34
+	rsx11m4.1_hlpdcl.rl02.dsk.gz	help and DCL volume
+	v6bin.rk05.dsk.gz		UNIX V6 binaries
+	rt11v03-1.rx01.dsk.gz		RT-11 v3 distribution floppy 1
+
+<medium>	The drive the image is mounted in, NOT the file format - the
+		format is a plain block image in every case:
+			rl02  rk05  rx01  rx02  rs11	and the MSCP drives
+			ra70  ra80  ra92
+		Where a script sets "p type", that is where the medium comes
+		from. An MSCP volume keeps the type it is mounted as even when
+		"p uis 1" takes the block count from the file, so a .ra80 image
+		may well be larger than a real RA80.
+.dsk		Always last, so every image has one known extension whatever
+		the medium is. This is what lets .gitignore hold a single
+		pattern, and it keeps names like "RTRKV4.00" - where the ".00"
+		is a version, not a medium - from being mistaken for one.
+		RTRKV4.00.rk05.dsk.gz says both.
+.gz		The compressed master, and the only form kept in the
+		repository. See "Compression" below.
+
+Two images of the same disk that have genuinely diverged are told apart by a
+suffix, not left as two files of the same name: mini-unix-tape1_20.rk05.dsk.gz
+and mini-unix-tape1_05.rk05.dsk.gz differ in 3% of their blocks and belong to
+the 11/20 and the 11/05 setup respectively.
+
+"diskimages" also holds the sources the images came from:
+
+	rx01_disk_images_woodstock.url
+	rx02_disk_images_ak6dn.url
+	unixv1_sources_jserv.url
+	woodstock_rx01_floppies.pdf
+
+
+Compression
+-----------
+Only the ".gz" is kept in the repository; the expanded image is a product of a
+run and .gitignore drops every "*.dsk". When demo cannot open the image a script
+names, it looks for "<image>.gz" and expands it with zcat
+(10.02_devices/2_src/storageimage.cpp).
+
+	CAVEAT: the expansion writes to the image path as the script spells it,
+	"../diskimages/<image>", and that is relative to the directory demo was
+	started IN, not to the script. So start a script from its own directory
+	- "cd rt11.rl02 ; sudo ./rt11v5.5.dlx.sh" - or the expanded image lands
+	beside a "diskimages" that may not exist. Once expanded it stays and the
+	next run opens it directly.
+
+Every image has its ".gz", so a fresh checkout has every disk an example needs.
+
+mini-unix-tape0.bin.dsk is the one file in "diskimages" that is not a disk: it
+is the Mini-UNIX bootstrap tape, no script mounts it, and it kept its ".bin".
