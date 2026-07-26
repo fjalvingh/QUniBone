@@ -37,6 +37,7 @@
 #include <string>
 #include <fstream>
 #include "logsource.hpp"
+#include "scriptpath.hpp"
 #include "bytebuffer.hpp"
 
 class storagedrive_c ;
@@ -78,7 +79,11 @@ private:
 
 public:
     storageimage_binfile_c(std::string _image_fname) {
-        image_fname = _image_fname ;
+        // An image file a script names is looked for next to the script, see
+        // 90_common/src/scriptpath.hpp. Resolved once here, so every open() and
+        // truncate() below works on the same file. An image which does not
+        // exist yet is created in the current directory, not next to the script.
+        image_fname = scriptpath_resolve(_image_fname) ;
     }
 
     // nothing to free

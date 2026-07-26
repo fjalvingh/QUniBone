@@ -265,14 +265,21 @@ built and run by the host compiler exactly like the CPU core tests, and run by `
 `./crossco` right before them (they take milliseconds, so a regression there aborts the build before
 the much longer CPU runs). Same skip switch, `SKIP_CPUTESTS=1` / `./crossco -n`.
 
-Currently one binary: `getopt2test` from `getopt2_test.cpp`, covering the commandline parser
-`90_common/src/getopt2.cpp` — the ordinary option forms, the error statuses, and the argument orders
-that arise when `demo` is used as a `#!` script interpreter (script name in front of the user's
-options; the whole tail of the `#!` line arriving as one single `argv[1]`). Two phases: a table of
-commandlines checked against the trace the parser must produce, then the same for real — the test
-binary writes a `#!` script naming *itself* as interpreter, runs it, and checks what the child
-reports, which is the only way to cover what the kernel actually hands over. Those script cases
-report SKIP (not FAIL, exit code still 0) if the environment refuses to execute the script.
+Two binaries so far:
+
+- `getopt2test` covers the commandline parser `90_common/src/getopt2.cpp` — the ordinary option
+  forms, the error statuses, and the argument orders that arise when `demo` is used as a `#!` script
+  interpreter (script name in front of the user's options; the whole tail of the `#!` line arriving
+  as one single `argv[1]`). Two phases: a table of commandlines checked against the trace the parser
+  must produce, then the same for real — the test binary writes a `#!` script naming *itself* as
+  interpreter, runs it, and checks what the child reports, which is the only way to cover what the
+  kernel actually hands over. Those script cases report SKIP (not FAIL, exit code still 0) if the
+  environment refuses to execute the script.
+- `scriptpathtest` covers `90_common/src/scriptpath.cpp`, which decides where a file named by a
+  command script is opened: next to the script if it exists there, otherwise the path is left alone
+  so it means the current working directory (which is what makes files the run *creates* appear
+  where the user started it, and why this is not a `chdir()`). Works on a real directory tree built
+  below the test binary.
 
 - The option set of `demo` is *replicated* in `getopt2_test.cpp` — `application.cpp` cannot be linked
   on the host, it pulls in the PRU/GPIO/logger stack. Adding or changing a `demo` option means
@@ -280,7 +287,7 @@ report SKIP (not FAIL, exit code still 0) if the environment refuses to execute 
 - Adding a unit test: drop `<unit>_test.cpp` next to the existing one and add `<unit>` to `TESTS` in
   `90_common/test/makefile`. The pattern rules build `4_deploy/<unit>test` from it plus
   `../src/<unit>.cpp`; a stamp per test binary means an unrelated build re-runs nothing.
-- Run it by hand for the full case list: `90_common/4_deploy/getopt2test -v`.
+- Run one by hand for its full case list: `90_common/4_deploy/getopt2test -v`.
 
 ## Change log
 

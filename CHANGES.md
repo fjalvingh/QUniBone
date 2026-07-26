@@ -2,6 +2,41 @@
 
 Notable changes to QUniBone, newest first.
 
+### A command script no longer changes the working directory
+
+Running a command file as a script (`demo testseq`, or `./testseq` via `#!`) used to `chdir()` into
+the script's directory, so that the images and listings it names would be found next to it. That
+also moved everything the run *creates* there — a memory dump, a trace, a freshly created disk image
+— while the natural place for a new file is the directory the user started the script in.
+
+The chdir is gone. `demo` now remembers the script's directory
+(`10.03_app_demo/2_src/application.cpp`, `opt_changedir` → `opt_script_relative`) and a new shared
+unit `90_common/src/scriptpath.{hpp,cpp}` resolves file names against it:
+
+- `scriptpath_resolve(path)` returns `<script dir>/<path>` if a script is running, `path` is
+  relative, **and the file exists there** — otherwise `path` unchanged. So an existing file is found
+  next to the script, and a new one is created in the current working directory. An absolute path
+  always means itself.
+- Call sites, all of them file names a script or the user supplies: the four loaders of
+  `10.01_base/2_src/arm/memoryimage.cpp` (binary, `addr: value` text, MACRO-11 listing, paper tape —
+  which is also how the m9312 ROM files and `rom.cpp` arrive), `ddrmem_c::load()`, the disk/tape
+  image of `storageimage_binfile_c` (in its constructor, so `open()` and `truncate()` agree, plus
+  the `.gz` probe next to it), `storageimage_memory_c::load_from_file()`, and the shared host
+  directory of `sharedfilesystem::storageimage_shared_c`.
+- Deliberately *not* resolved, so they land in the current directory: `memoryimage_c::save_binary()`,
+  `ddrmem_c::save()`, `save_to_file()` (image snapshots), the CPU cycle trace file and the log file.
+  `absolute_path()` in `utils.cpp` keeps meaning "against the current directory".
+
+`--cmdfile` is unchanged: it never chdir'ed, and it gets no script directory either, so all its
+paths stay relative to the current directory as before. Only the bare-argument/`#!` form resolves.
+`--help` describes the rule.
+
+**Verified**: cross-compile only (`./crossco`, UNIBUS), no hardware run — the call sites are
+compiled but not exercised, since they need a backplane. The resolver itself has 21 unit tests in
+the new `90_common/test/scriptpath_test.cpp`, working on a real directory tree; dropping its
+exists-check (the "always prepend" variant this change deliberately does not do) makes exactly the
+three cases fail which pin the create-in-current-directory behaviour.
+
 ### Command line options now work when `demo` is used as a script interpreter
 
 `demo` accepts a command file as a plain argument (and then chdirs to its directory), which makes a

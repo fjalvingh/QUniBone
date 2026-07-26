@@ -142,10 +142,9 @@ if [ "$GENERATE_COMPILE_COMMANDS" -eq 1 ]; then
   CPUTEST_OBJDIR="$QUNIBONE_DIR/10.05_cputest/4_deploy"
   CPUTEST_HARNESS_OBJS="$CPUTEST_OBJDIR/cputest.o $CPUTEST_OBJDIR/papertape.o $CPUTEST_OBJDIR/testbus.o $CPUTEST_OBJDIR/testcore.o $CPUTEST_OBJDIR/testcore_cpu20.o $CPUTEST_OBJDIR/testcore_cpu34.o"
   bear --append --output "$COMPILE_COMMANDS" -- make -C "$CPUTEST_DIR" $CPUTEST_HARNESS_OBJS || exit 1
-  # Same for the 90_common test sources. Only the test itself: the units under
-  # test (getopt2.cpp, ...) are in the database from the ARM build already.
-  bear --append --output "$COMPILE_COMMANDS" -- make -C "$COMMONTEST_DIR" \
-      "$QUNIBONE_DIR/90_common/4_deploy/getopt2_test.o" || exit 1
+  # Same for the 90_common test sources. Only the tests themselves: the units
+  # under test (getopt2.cpp, ...) are in the database from the ARM build already.
+  bear --append --output "$COMPILE_COMMANDS" -- make -C "$COMMONTEST_DIR" testobjects || exit 1
 else
   make || exit 1
 fi

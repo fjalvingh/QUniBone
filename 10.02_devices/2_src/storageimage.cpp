@@ -102,7 +102,7 @@ bool storageimage_binfile_c::open(storagedrive_c *_drive, bool create)
         if (retries > 0) {
             // file could not be opened, neither rw nor read only
             // try to unzip, then retry opening
-            std::string compressed_image_fname = image_fname + ".gz" ;
+            std::string compressed_image_fname = scriptpath_resolve(image_fname + ".gz") ;
             if (FILE *fz = fopen(compressed_image_fname.c_str(), "r")) {
                 fclose(fz);
                 std::string uncompress_cmd = "zcat " + compressed_image_fname + " >" + image_fname ;
@@ -405,7 +405,9 @@ bool storageimage_memory_c::load_from_file(std::string _host_filename,
     bool result ;
     bool file_created = false ;
     try {
-        host_filename = absolute_path(&_host_filename) ;
+        // existing image next to the script, new one in the current directory
+        std::string resolved = scriptpath_resolve(_host_filename) ;
+        host_filename = absolute_path(&resolved) ;
 
         // opens image file or creates it
         int32_t file_descriptor;

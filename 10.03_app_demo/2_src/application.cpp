@@ -58,6 +58,7 @@
 #include "getopt2.hpp"
 #include "kbhit.h"
 #include "inputline.hpp"
+#include "scriptpath.hpp"
 #include "pru.hpp"
 #include "mailbox.h"
 #include "gpios.hpp"
@@ -119,6 +120,10 @@ void application_c::help()
     std::cout << "    #!/home/pi/10.03_app_demo/4_deploy/" PROGNAME " --verbose\n";
     std::cout << "and is then run as \"sudo ./testseq\", optionally with further options.\n";
     std::cout << "The \"#!\" line itself is ignored, as any line starting with \"#\".\n";
+    std::cout << "An existing file the command file names - a disk image, a MACRO-11 listing,\n";
+    std::cout << "a shared directory - is looked for next to the command file, so script and\n";
+    std::cout << "data may travel together. Files created while it runs appear in the\n";
+    std::cout << "directory it was started from, as they would without a script.\n";
     std::cout << "\n";
 
     exit(1);
@@ -203,9 +208,10 @@ void application_c::parse_commandline(int argc, char **argv)
     //                      "Sets integer args and option string arg");
 
     getopt_parser.define("", "", "cmdfile", "", "",
-                         "File from which commands are read, like --cmdfile, but the\n"
-                         "current directory is changed to the one holding <cmdfile>, so\n"
-                         "paths inside it are relative to the file itself.\n"
+                         "File from which commands are read, like --cmdfile, but a file\n"
+                         "named in it is also looked for next to <cmdfile> itself, so a\n"
+                         "script and its images may travel together. Files the script\n"
+                         "creates still appear in the current directory.\n"
                          "Allows use as \"#!\" script interpreter.\n"
                          "Options may be given before and after <cmdfile>.", "testseq",
                          "read commands from file \"testseq\" and execute line by line", "", "");
@@ -270,7 +276,7 @@ void application_c::parse_commandline(int argc, char **argv)
             if (getopt_parser.arg_s("cmdfile", opt_cmdfilename) < 0) {
                 commandline_option_error(NULL);
             } else {
-                opt_changedir = true;
+                opt_script_relative = true;
             }
         }
         res = getopt_parser.next();
@@ -356,16 +362,14 @@ int application_c::run(int argc, char *argv[])
             return -1;
         }
 
-        if(opt_changedir) {
-            // Make the cwd the dir where the command file resides
-            // Needs to come after opening the cmdfile because the
-            // cmd will cause the open to fail (as the relative path)
-            // changes)
-            int pos = opt_cmdfilename.find_last_of('/');
-            if(pos > 0) {
-                std::string wd = opt_cmdfilename.substr(0, pos);
-                chdir(wd.c_str());
-            }
+        if (opt_script_relative) {
+            // A script names further files - disk images, MACRO-11 listings, a
+            // shared directory - relative to itself, not to wherever the user
+            // stands. Remember its directory, so those are found there.
+            // Deliberately not a chdir() into it: everything the application
+            // *creates* shall still appear in the directory the script was
+            // started from. See 90_common/src/scriptpath.hpp.
+            scriptpath_set(opt_cmdfilename);
         }
 
     }

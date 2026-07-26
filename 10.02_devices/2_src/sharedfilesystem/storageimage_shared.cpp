@@ -181,6 +181,7 @@ on disk           root              <-----        root
 
 #include "logger.hpp"
 #include "utils.hpp"
+#include "scriptpath.hpp"
 #include "timeout.hpp"
 
 #include "storagedrive.hpp"
@@ -206,7 +207,11 @@ storageimage_shared_c::storageimage_shared_c(
     image_path = _image_path ;
     type = _filesystem_type ;
 
-    host_shared_rootdir = absolute_path(&_hostdir) ;
+    // A shared directory a script names is looked for next to the script, see
+    // 90_common/src/scriptpath.hpp. An existing one is found there; one that has
+    // to be created (below, in open()) appears in the current directory.
+    std::string hostdir = scriptpath_resolve(_hostdir) ;
+    host_shared_rootdir = absolute_path(&hostdir) ;
 
     filesystem_dec_metadata_snapshot = nullptr ;
     filesystem_dec = nullptr ;

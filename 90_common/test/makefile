@@ -38,12 +38,12 @@ CXXFLAGS = \
 
 # One test binary per unit under test: <name>test from <name>_test.cpp plus the
 # unit's own source out of ../src.
-TESTS = getopt2
+TESTS = getopt2 scriptpath
 
 PROGS = $(foreach t,$(TESTS),$(OBJDIR)/$(t)test)
 STAMPS = $(foreach t,$(TESTS),$(STAMPDIR)/$(t).ok)
 
-.PHONY: all test retest clean
+.PHONY: all test retest clean testobjects
 
 # else make deletes the objects and even the test binaries again as
 # intermediates of the pattern rule chain below, and relinks them every time.
@@ -57,6 +57,11 @@ test: $(STAMPS)
 retest:
 	rm -rf $(STAMPDIR)
 	$(MAKE) test
+
+# compile the test sources without running anything: ./crossco -c wraps this in
+# "bear" to get them into compile_commands.json. Only the tests themselves - the
+# units under test are in there from the ARM build of "demo" already.
+testobjects: $(foreach t,$(TESTS),$(OBJDIR)/$(t)_test.o)
 
 clean:
 	rm -rf $(OBJDIR)

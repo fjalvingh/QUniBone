@@ -62,7 +62,9 @@ public:
 	// command line args
 	unsigned opt_linewidth = 80;
 	std::string opt_cmdfilename;
-	bool opt_changedir = false;
+	// command file given as bare argument (which is how a "#!" script arrives):
+	// resolve relative file names in it against the script's own directory
+	bool opt_script_relative = false;
 	getopt_c getopt_parser;
 	void help(void);
 	void commandline_error(void);
