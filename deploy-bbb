@@ -20,14 +20,8 @@ if [ -z "$BBB_HOST" ]; then
   exit 1
 fi
 
-case "$QUNIBONE_PLATFORM" in
-  UNIBUS) QUNIBONE_PLATFORM_SUFFIX=_u ;;
-  QBUS)   QUNIBONE_PLATFORM_SUFFIX=_q ;;
-  *)
-    echo "Error: QUNIBONE_PLATFORM in $CROSSCOMPILE_ENV must be set to UNIBUS or QBUS (got '$QUNIBONE_PLATFORM')." >&2
-    exit 1
-    ;;
-esac
+# QUNIBONE_PLATFORM from qunibone-platform.env, plus the derived _u/_q suffix
+. "$SCRIPT_DIR/qunibone-platform-env.sh" || exit 1
 
 RELATIVE_DIR="10.03_app_demo/4_deploy$QUNIBONE_PLATFORM_SUFFIX"
 LOCAL_BINARY="$SCRIPT_DIR/$RELATIVE_DIR/demo"

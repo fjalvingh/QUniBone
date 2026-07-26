@@ -24,9 +24,19 @@ UNIBUS and QBUS are similar enough to share almost all code. Differences are han
 - **File suffixes**: a source file that only applies to one bus is named with `_u` (UNIBUS) or `_q`
   (QBUS), e.g. `qunibussignals_u.cpp` / `qunibussignals_q.cpp`, `pru1_u/` / `pru1_q/`.
 - **Directory suffixes + symlinks**: e.g. `10.01_base/4_deploy_q` is a real directory; `4_deploy` is
-  created as a symlink to whichever variant applies. This linking is done by `qunibone-platform.sh`
-  (driven by `qunibone-platform.env`, which is hardware-specific and NOT checked into the repo —
-  copy `qunibone-platform.env.example` to create it).
+  created as a symlink to whichever variant applies. This linking is done by `qunibone-platform.sh`.
+
+`QUNIBONE_PLATFORM=UNIBUS|QBUS` in `qunibone-platform.env` (repo root) is the **single** setting
+that picks the bus, for every build path — `compile.sh` on the BeagleBone, `crossco` on an x64 host,
+plus `qunibone-platform.sh`, `deploy-bbb` and `debug-bbb`. That file is hardware-specific and NOT
+checked into the repo (gitignored); every one of those scripts creates it from
+`qunibone-platform.env.example` when missing. They all get it through the small sourced helper
+`qunibone-platform-env.sh`, which reads the file and **derives** `QUNIBONE_PLATFORM_SUFFIX`
+(`UNIBUS` → `_u`, `QBUS` → `_q`). The suffix is never written down anywhere: not in the env file,
+not in a script. Anything not UNIBUS/QBUS is a hard error naming the file. A legacy
+`qunibone-platform.env` from an older installation, which called the variable `MAKE_QUNIBUS`, is
+still accepted; a legacy `PLATFORM_SUFFIX`/`QUNIBONE_PLATFORM_SUFFIX` in it is ignored, since the
+suffix now follows from the platform.
 
 When editing something bus-specific, check whether a `_u`/`_q` sibling file needs the matching
 change.
@@ -108,10 +118,10 @@ Compile everything (PRU firmware + the `demo` ARM binary):
 ./compile.sh          # incremental
 ./compile.sh -a       # `make clean` first, full rebuild
 ```
-`compile.sh` sources `qunibone-platform.env` (`QUNIBONE_PLATFORM=UNIBUS|QBUS`,
-`QUNIBONE_PLATFORM_SUFFIX=_u|_q` — hardware-specific and NOT checked into the repo; copy
-`qunibone-platform.env.example` to create it, or let `qunibone-platform.sh` generate it) and
-`compile-bbb.env` (`BBB_CC=gcc`, `PRU_CGT=/usr/share/ti/cgt-pru/`) itself — no manual
+`compile.sh` gets the platform through `qunibone-platform-env.sh` (see
+[Bus differentiation](#bus-differentiation-_u--_q) above: `QUNIBONE_PLATFORM` out of
+`qunibone-platform.env`, `QUNIBONE_PLATFORM_SUFFIX` derived) and sources `compile-bbb.env`
+(`BBB_CC=gcc`, `PRU_CGT=/usr/share/ti/cgt-pru/`) itself — no manual
 `. qunibone-platform.env` step needed first. `compile-x64.env` is an older, unused variant of
 `compile-bbb.env` (stale toolchain paths, not referenced by `compile.sh` or `crossco`); Eclipse
 remote-debug setups reference `QUNIBONE_DIR`, `BBB_CC`, `PRU_CGT`.
@@ -132,7 +142,7 @@ Run the resulting binary:
 To build/rebuild a single object file directly, invoke make with the right variables, e.g. from
 `10.03_app_demo/2_src`:
 ```bash
-QUNIBONE_PLATFORM=UNIBUS QUNIBONE_PLATFORM_SUFFIX=_u MAKE_CONFIGURATION=RELEASE make ../4_deploy_u/rl11.o
+QUNIBONE_PLATFORM=UNIBUS MAKE_CONFIGURATION=RELEASE make ../4_deploy_u/rl11.o
 ```
 `make print-VARNAME` (from that same makefile) dumps any make variable for debugging the build.
 
@@ -143,14 +153,19 @@ without touching real BBB hardware. It sets `QUNIBONE_DIR` itself, derived from 
 (`$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)`) — so it always points at whichever checkout
 `crossco` is run from, with no fixed-path assumption.
 
-All other settings (`QUNIBONE_PLATFORM`, `GCC_ROOT`, `CROSS_COMPILE`, `BBB_CC`, `PRU_CGT`, ...) live
-in `crosscompile.env` at the repo root, which is gitignored (it holds user-specific paths and the
-UNIBUS/QBUS choice). Only `crosscompile.env.example` is tracked in git, with every setting
-commented out. If `crosscompile.env` doesn't exist, `crossco` copies the example to it, prints
-instructions, and exits — the user edits that copy (uncommenting `QUNIBONE_PLATFORM=UNIBUS` or
-`=QBUS` and the toolchain paths) and reruns. `QUNIBONE_PLATFORM_SUFFIX` is never set in the env
-file; `crossco` derives it itself from `QUNIBONE_PLATFORM` (`UNIBUS` → `_u`, `QBUS` → `_q`,
-anything else is a hard error).
+The toolchain settings (`GCC_ROOT`, `CROSS_COMPILE`, `BBB_CC`, `PRU_CGT`, `BBB_HOST`, ...) live in
+`crosscompile.env` at the repo root, which is gitignored (it holds user-specific paths). Only
+`crosscompile.env.example` is tracked in git, with every setting commented out. If
+`crosscompile.env` doesn't exist, `crossco` copies the example to it, prints instructions, and
+exits — the user edits that copy (the toolchain paths) and reruns.
+
+The target bus is *not* in that file: `crossco` reads `QUNIBONE_PLATFORM` from
+`qunibone-platform.env` through `qunibone-platform-env.sh`, exactly like `compile.sh` does, so both
+build paths always agree and there is nothing to keep in sync. `crossco` bootstraps that file from
+`qunibone-platform.env.example` too when it is missing, and then exits once (the same "edit and
+rerun" pattern as `crosscompile.env`) so nobody silently builds the default `UNIBUS` for QBone
+hardware. A `QUNIBONE_PLATFORM` left over in an older `crosscompile.env` is ignored, with a note
+saying so — migration aid only, it can be deleted from that file.
 
 After sourcing, `crossco` validates the toolchain, not just that variables are non-empty: it checks
 that `$GCC_ROOT/bin/arm-linux-gnueabihf-gcc`, `$PRU_CGT/bin/clpru`, and the binary named by the
@@ -183,13 +198,15 @@ leaving it untouched on a subsequent plain run, forced regeneration via `-c`, an
 for an unrecognized flag all behave as intended; only pre-existing
 `-Wimplicit-fallthrough`/unused-variable warnings appear during compilation, no errors. Re-verified
 same day after the DBG-by-default/`-r` change: a plain `./crossco -a` compiles with `-ggdb3 -O0`
-and links a `demo` with debug info; `./crossco -a -r` compiles with `-O3` instead.
+and links a `demo` with debug info; `./crossco -a -r` compiles with `-O3` instead. Re-verified
+2026-07-26 after the platform setting moved to `qunibone-platform.env`: creating that file and
+exiting on the first run, a full successful build on the second, the invalid-platform error, a
+legacy `MAKE_QUNIBUS`/`PLATFORM_SUFFIX` file resolving to the platform's own suffix, and the
+obsolete-`QUNIBONE_PLATFORM`-in-`crosscompile.env` note.
 
-Note: `qunibone-platform.env` (sourced by `compile.sh`, and separately by `qunibone-platform.sh` to
-drive the `_u`/`_q` symlinks — see [Bus differentiation](#bus-differentiation-_u--_q) above) and
-`crosscompile.env` (used only by `crossco`) are two separate, independent files that both happen to
-configure `QUNIBONE_PLATFORM`/`QUNIBONE_PLATFORM_SUFFIX` — keep both in sync manually if you switch
-platforms and use both build paths. `crossco` doesn't touch the `_u`/`_q` symlinks at all.
+Note: `crossco` doesn't touch the `_u`/`_q` symlinks at all; those are `qunibone-platform.sh`'s job
+on an installed BBB. Both read the same `qunibone-platform.env` — there is no second place a
+platform can be configured, and nothing to keep in sync.
 
 ### Adding a device source file
 

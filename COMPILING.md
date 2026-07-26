@@ -30,11 +30,16 @@ remote debugging (e.g. with `gdbserver` on the BeagleBone) without an extra step
 optimized release build instead.
 
 The first run creates `crosscompile.env` from the committed `crosscompile.env.example` template
-and stops, asking you to edit it: uncomment `QUNIBONE_PLATFORM=UNIBUS` or `=QBUS`, and set
-`GCC_ROOT`/`PRU_CGT` to wherever you installed the toolchains above. `crosscompile.env` is
-gitignored, since it holds your local paths rather than something to commit. Rerun `./crossco`
-after editing — it checks that the configured toolchain binaries actually exist before building,
-and reports clearly if something's missing or misconfigured.
+and stops, asking you to edit it: set `GCC_ROOT`/`PRU_CGT` to wherever you installed the toolchains
+above. `crosscompile.env` is gitignored, since it holds your local paths rather than something to
+commit. Rerun `./crossco` after editing — it checks that the configured toolchain binaries actually
+exist before building, and reports clearly if something's missing or misconfigured.
+
+The target bus is *not* part of that file: `QUNIBONE_PLATFORM=UNIBUS` or `=QBUS` in
+`qunibone-platform.env` is the single setting that selects it, for this cross-compile and for a
+build on the BeagleBone itself alike. `crossco` creates that file too (from
+`qunibone-platform.env.example`, defaulting to `UNIBUS`) and stops once, so you can pick the bus
+before building. The `_u`/`_q` file tree suffix is derived from it and is never set by hand.
 
 The resulting binary is `10.03_app_demo/4_deploy_u/demo` (or `4_deploy_q` for QBUS).
 

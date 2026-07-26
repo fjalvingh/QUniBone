@@ -2,6 +2,38 @@
 
 Notable changes to QUniBone, newest first.
 
+### One place to select UNIBUS or QBUS, for both build paths
+
+The target bus was configured twice: `QUNIBONE_PLATFORM` in `crosscompile.env` for `crossco`, and
+`QUNIBONE_PLATFORM` *plus* a hand-written `QUNIBONE_PLATFORM_SUFFIX` in `qunibone-platform.env` for
+`compile.sh`. Two files that had to be kept in sync by hand, and one of them holding a setting that
+follows from the other — a build for the wrong bus, or a `_u` tree built with `-DQBUS`, was one
+forgotten edit away.
+
+- `qunibone-platform.env` is now the single place, with the single setting `QUNIBONE_PLATFORM`.
+  Its example file (`qunibone-platform.env.example`) no longer contains the suffix at all.
+- New `qunibone-platform-env.sh` in the repo root: a small sourced helper that creates
+  `qunibone-platform.env` from the example when missing, reads it, and **derives**
+  `QUNIBONE_PLATFORM_SUFFIX` (`UNIBUS` → `_u`, `QBUS` → `_q`; anything else is a hard error naming
+  the file). It is found relative to itself, so it works no matter what the current directory is.
+  Legacy installations whose `qunibone-platform.env` still says `MAKE_QUNIBUS` keep working; a
+  legacy `PLATFORM_SUFFIX` in it is now ignored rather than obeyed.
+- `crossco`, `compile.sh`, `qunibone-platform.sh`, `deploy-bbb` and `debug-bbb` all use that helper
+  instead of their own copy of the case-statement/legacy-fallback logic. `crossco` bootstraps
+  `qunibone-platform.env` and exits once, the same way it already does for `crosscompile.env`, so
+  the bus is a deliberate choice rather than a silent default.
+- `crosscompile.env.example` lost its `QUNIBONE_PLATFORM` lines. A leftover `QUNIBONE_PLATFORM` in
+  an existing `crosscompile.env` is ignored, and `crossco` prints a note saying where the setting
+  lives now. `qunibone-platform.env` is gitignored, like `crosscompile.env`.
+- Fixed in passing: `link4sh()` in `qunibone-platform.sh` still used the long-renamed
+  `PLATFORM_SUFFIX` (harmless so far, the function has no callers).
+
+Verified on the x64 cross-compile host: bootstrap-and-exit on the first `./crossco`, a full
+successful build on the second, the invalid-platform error, a legacy `MAKE_QUNIBUS` +
+`PLATFORM_SUFFIX=_u` file resolving to `QBUS`/`_q`, and the obsolete-setting note. `compile.sh` and
+`qunibone-platform.sh` are BBB-only and were not run, only syntax-checked — they take the platform
+from the same helper.
+
 ### A PDP-11 disassembler, and `da` to list a code region
 
 `demo` could EXAMINE memory, but only as octal words: memory holding *code* was unreadable without a

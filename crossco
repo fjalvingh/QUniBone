@@ -48,29 +48,33 @@ if [ "$GENERATE_COMPILE_COMMANDS" -eq 1 ]; then
   CLEAN=1
 fi
 
-# Platform + toolchain settings (QUNIBONE_PLATFORM, GCC_ROOT, PRU_CGT, BBB_CC, ...).
-# crosscompile.env is user-specific and gitignored; bootstrap it from the
-# committed example on first use.
+# Toolchain settings (GCC_ROOT, PRU_CGT, BBB_CC, ...). crosscompile.env is
+# user-specific and gitignored; bootstrap it from the committed example on
+# first use.
 CROSSCOMPILE_ENV="$SCRIPT_DIR/crosscompile.env"
 CROSSCOMPILE_ENV_EXAMPLE="$SCRIPT_DIR/crosscompile.env.example"
 if [ ! -f "$CROSSCOMPILE_ENV" ]; then
   cp "$CROSSCOMPILE_ENV_EXAMPLE" "$CROSSCOMPILE_ENV"
   echo "Created $CROSSCOMPILE_ENV from crosscompile.env.example." >&2
-  echo "Edit it to set QUNIBONE_PLATFORM and your toolchain paths, then run ./crossco again." >&2
+  echo "Edit it to set your toolchain paths, then run ./crossco again." >&2
   exit 1
 fi
+obsolete_platform="$QUNIBONE_PLATFORM"
 . "$CROSSCOMPILE_ENV"
-export QUNIBONE_PLATFORM
+if [ -z "$obsolete_platform" ] && [ -n "$QUNIBONE_PLATFORM" ]; then
+  echo "Note: QUNIBONE_PLATFORM in $CROSSCOMPILE_ENV is obsolete and ignored;" >&2
+  echo "      the target platform now comes from qunibone-platform.env only." >&2
+fi
 
-# QUNIBONE_PLATFORM_SUFFIX is derived from QUNIBONE_PLATFORM, never set directly.
-case "$QUNIBONE_PLATFORM" in
-  UNIBUS) export QUNIBONE_PLATFORM_SUFFIX=_u ;;
-  QBUS)   export QUNIBONE_PLATFORM_SUFFIX=_q ;;
-  *)
-    echo "Error: QUNIBONE_PLATFORM in $CROSSCOMPILE_ENV must be set to UNIBUS or QBUS (got '$QUNIBONE_PLATFORM')." >&2
-    exit 1
-    ;;
-esac
+# The target platform: QUNIBONE_PLATFORM from qunibone-platform.env (created
+# from its example if missing), plus the _u/_q suffix derived from it. Same
+# single setting the BeagleBone build (compile.sh) uses.
+. "$SCRIPT_DIR/qunibone-platform-env.sh" || exit 1
+if [ "$QUNIBONE_PLATFORM_ENV_CREATED" -eq 1 ]; then
+  echo "It selects QUNIBONE_PLATFORM=$QUNIBONE_PLATFORM; edit it if you build for the other bus," >&2
+  echo "then run ./crossco again." >&2
+  exit 1
+fi
 
 # Whether it is a RELEASE or a DBG build; DBG by default so a binary built by
 # ./crossco is remote-debuggable (-ggdb3 -O0) without extra steps. Pass -r for

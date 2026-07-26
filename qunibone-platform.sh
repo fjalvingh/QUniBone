@@ -11,37 +11,10 @@
 #trap read debug
 
 # Are we running on UniBone or QBone hardware ?
-PLATFORMENV="qunibone-platform.env"
-if [ ! -f $PLATFORMENV ]; then
-  # on old UniBone installation, use "example" file as UniBone config
-  cp qunibone-platform.env.example $PLATFORMENV
-fi
-if [ ! -f $PLATFORMENV ]; then
-  echo "Error: Platform settings in file $PLATFORMENV not found!"
-  exit 1
-fi
-
-
-. $PLATFORMENV
-
-# fix legacy qunibone-platform.env: QUNIBONE_PLATFORM was MAKE_QUNIBUS
-# QUNIBONE_PLATFORM_SUFFIX was PLATFORM_SUFFIX
-if [ -z "$QUNIBONE_PLATFORM_SUFFIX" ] ; then
-        QUNIBONE_PLATFORM_SUFFIX=$PLATFORM_SUFFIX
-fi
-if [ -z "$QUNIBONE_PLATFORM" ] ; then
-        QUNIBONE_PLATFORM=$MAKE_QUNIBUS
-fi
-
-
-if [ -z "$QUNIBONE_PLATFORM" ]; then
-  echo "Error: variable QUNIBONE_PLATFORM not set or empty!"
-  exit 1
-fi
-if [ -z "$QUNIBONE_PLATFORM_SUFFIX" ]; then
-  echo "Error: variable QUNIBONE_PLATFORM_SUFFIX not set or empty!"
-  exit 1
-fi
+# QUNIBONE_PLATFORM from qunibone-platform.env (created from its example, as an
+# UniBone config, if missing), QUNIBONE_PLATFORM_SUFFIX derived from it.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SCRIPT_DIR/qunibone-platform-env.sh" || exit 1
 
 
 #################################################################
@@ -77,7 +50,7 @@ function link4sh() {
   # try to match "dir/filename_u.sh"
 
   substr=.sh
-  replace=${PLATFORM_SUFFIX}.sh
+  replace=${QUNIBONE_PLATFORM_SUFFIX}.sh
   # find at end of file
   filepath=${linkpath/%$substr/$replace}
 

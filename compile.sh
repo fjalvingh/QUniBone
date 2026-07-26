@@ -4,23 +4,17 @@
 #
 # to be called after qunibone-platform.sh
 
-. qunibone-platform.env
+# QUNIBONE_PLATFORM (from qunibone-platform.env, the only place it is set)
+# and the _u/_q suffix derived from it
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SCRIPT_DIR/qunibone-platform-env.sh" || exit 1
 . compile-bbb.env
-
-# guard against legacy qunibone-platform.env
-if [ -z "$QUNIBONE_PLATFORM_SUFFIX" ] ; then
-        QUNIBONE_PLATFORM_SUFFIX=$PLATFORM_SUFFIX
-fi
-if [ -z "$QUNIBONE_PLATFORM" ] ; then
-        QUNIBONE_PLATFORM=$MAKE_QUNIBUS
-fi
 
 # makefile_u or makefile_q
 MAKEFILE=makefile$QUNIBONE_PLATFORM_SUFFIX
 
 # Debugging: remote from Eclipse. Compile on BBB is release.
 export MAKE_CONFIGURATION=RELEASE
-export QUNIBONE_PLATFORM
 
 QUNIBONE_DIR=${QUNIBONE_DIR:-$(pwd)}
 CPUTEST_DIR="$QUNIBONE_DIR/10.05_cputest/2_src"

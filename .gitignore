@@ -7,6 +7,7 @@ CMakeLists.txt
 .vscode
 compile_commands.json
 crosscompile.env
+qunibone-platform.env
 **/4_deploy_u/**
 10.05_cputest/4_deploy/
 90_common/4_deploy/
