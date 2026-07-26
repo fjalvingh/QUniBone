@@ -1,6 +1,5 @@
 #!/root/10.03_app_demo/4_deploy/demo --verbose
 # inputfile for demo to select a rl1 device in the "device test" menu.
-# Read in with command line option  "demo --cmdfile ..."
 d			# device test menu
 
 # en dl11		# use emulated serial console

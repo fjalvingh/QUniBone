@@ -1,6 +1,5 @@
 #!/root/10.03_app_demo/4_deploy/demo --verbose
 # inputfile for demo to just emulate max memory
-# Read in with command line option  "demo --cmdfile ..."
 d			# device menu
 
 

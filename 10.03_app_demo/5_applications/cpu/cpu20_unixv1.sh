@@ -3,7 +3,6 @@
 # CPU, serial+clock, memory, RF11/RS11 and EA
 #
 
-# Read in with command line option  "demo --cmdfile ..."
 dc			# device menu
 
 # first, make a serial port. Default ist

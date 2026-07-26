@@ -1,6 +1,5 @@
 #!/root/10.03_app_demo/4_deploy/demo --verbose
 # inputfile for demo to select a rk05 device in the "device test" menu.
-# Read in with command line option  "demo --cmdfile ..."
 # mounts 4 "Mini.Unix" RK05 images
 d			# device test menu
 pwr

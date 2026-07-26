@@ -1,6 +1,5 @@
 #!/root/10.03_app_demo/4_deploy/demo --verbose
 # inputfile for demo to select a rl1 device in the "device test" menu.
-# Read in with command line option  "demo --cmdfile ..."
 
 # Assume CPU stopped. No DMA until booted!
 d			# device test menu

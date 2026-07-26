@@ -2,7 +2,6 @@
 # Main PDP-1120 must be HALTed
 # Inputfile for demo to execute "Hello world"
 # Uses emulated CPU and physical DL11
-# Read in with command line option  "demo --cmdfile ..."
 
 dc			# "device with cpu" menu
 

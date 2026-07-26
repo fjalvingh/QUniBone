@@ -2,7 +2,6 @@
 # Main PDP-11/20 must be HALTed
 # Inputfile for demo to execute "Hello world"
 # Uses emulated CPU and (physical or emulated) DL11
-# Read in with command line option  "demo --cmdfile ..."
 #
 # Listing corresponding to ZQKC rev E:
 # bitsavers.informatik.uni-stuttgart.de/pdf/dec/pdp11/xxdp/diag_listings/MAINDEC-11-DZQKC-E-D_11_Family_Instruction_Exerciser_Mar75.pdf
