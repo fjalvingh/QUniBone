@@ -10,9 +10,15 @@ Directories
 <OS>.<boot medium>		rt11.rl02, unixv6.rk05, rsx11.mscp, rt11.rx01
 
 The medium is the drive the example boots from, not the controller: rl02, rk05,
-rx01, rx02, mscp. Directories without a medium hold something else: "cpu" the
-emulated PDP-11/20, "memory" the memory emulation, "m9312" the boot ROM,
-"unixv1" the single UNIX V1 setup.
+rx01, rx02, mscp. Directories without a medium hold something else: "cpu20" and
+"cpu34" the two emulated CPUs, "memory" the memory emulation, "m9312" the boot
+ROM, "unixv1" the single UNIX V1 setup.
+
+"cpu20" and "cpu34" hold the same set of examples for the two emulated CPU
+models, script for script: the same setup with "en cpu20" or "en cpu34" and the
+model named in what it prints. The exception is cpu20_zqkc.sh, which has no
+counterpart: ZQKC is the MAINDEC 11/20 family instruction exerciser and needs
+"p swab 1", a parameter the 11/20 emulation alone has.
 
 An example directory holds only what belongs to that setup alone: its scripts, a
 MACRO-11 source or program it is the only user of (serial.lst, zkma.ptap,
@@ -165,6 +171,8 @@ emulation rather than deposited into memory:
 	23-756A9.lst	'DK/DT' boot PROM, RK03/05 and TU55/56
 	23-767A9.lst	'DU' boot PROM, MSCP
 
-Not here, because one example alone uses each: cpu/serial.lst (a serial I/O
-test, not a bootloader), cpu/ZQKC_E_05_20.abs and memory/zkma.ptap (MAINDEC
-diagnostics, loaded with "m lp" and "lp").
+Not here, because they are not bootloaders: serial.lst (a serial I/O test),
+cpu20/ZQKC_E_05_20.abs (a MAINDEC diagnostic, loaded with "m lp") and
+memory/zkma.ptap (the same, loaded with "lp"). serial.lst sits in both cpu20 and
+cpu34, the one place a file is deliberately kept twice - each directory is a
+self-contained set of examples for its CPU.
