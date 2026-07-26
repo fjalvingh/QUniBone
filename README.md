@@ -49,6 +49,18 @@ on the `#!` line and on the invocation — combinations the option parser used t
 script names are looked up next to the script, while files the run creates land in the directory
 you started it from.
 
+### Ready-to-run example applications
+
+`10.03_app_demo/5_applications` now holds the ready-made setups themselves — RT-11, RSX-11M, UNIX V6,
+2.11BSD, XXDP and more — each a single executable script, run as `sudo ./rt11v5.5.dlx.sh`. Their disk
+images and bootloaders are shared between the examples, kept compressed, and unpacked on first use.
+
+Each example used to be a `.sh` wrapper plus the `.cmd` file it started, beside its own copies of the
+disk images and bootloader listings it needed — the XXDP 2.5 disk existed three times over, `dl.lst`
+five times. A setup is now a single script in a directory named `<OS>.<medium>` (`rt11.rl02`,
+`unixv6.rk05`), while every image lives in `5_applications/diskimages` and every bootloader listing
+in `5_applications/bootloaders`, one copy each; `name_scheme.txt` there describes the naming in full.
+
 ### Configuration mistakes no longer end the session
 
 Enabling two devices at overlapping I/O page addresses used to abort `demo`. It now reports the

@@ -125,15 +125,10 @@ Compression
 -----------
 Only the ".gz" is kept in the repository; the expanded image is a product of a
 run and .gitignore drops every "*.dsk". When demo cannot open the image a script
-names, it looks for "<image>.gz" and expands it with zcat
-(10.02_devices/2_src/storageimage.cpp).
-
-	CAVEAT: the expansion writes to the image path as the script spells it,
-	"../diskimages/<image>", and that is relative to the directory demo was
-	started IN, not to the script. So start a script from its own directory
-	- "cd rt11.rl02 ; sudo ./rt11v5.5.dlx.sh" - or the expanded image lands
-	beside a "diskimages" that may not exist. Once expanded it stays and the
-	next run opens it directly.
+names, it looks for "<image>.gz" next to the script and expands it with zcat
+into the directory it found it in - so "diskimages", beside its own ".gz"
+(10.02_devices/2_src/storageimage.cpp). It stays there, and every later run,
+from wherever it is started, opens it directly.
 
 Every image has its ".gz", so a fresh checkout has every disk an example needs.
 

@@ -2,6 +2,46 @@
 
 Notable changes to QUniBone, newest first.
 
+### The example applications are in the repository, and share their disks
+
+`10.03_app_demo/5_applications` — the ready-made setups that boot RT-11, RSX-11M, UNIX V6, 2.11BSD,
+XXDP and the rest — is now part of the repository instead of something assembled by hand on each
+machine.
+
+Each example was a pair: a `.sh` wrapper that `cd`'ed into its directory and started `demo
+--cmdfile`, plus the `.cmd` file it named. With the `#!` support they are one file: the command file
+itself, starting with `#!/root/10.03_app_demo/4_deploy/demo --verbose`, so an example runs as `sudo
+./rt11v5.5.dlx.sh`. Scripts identical but for their name were merged (`xxdp22-25.dlx.sh`,
+`rt11v5.5.dlx.sh`) — the drive number in the old names described which start address the operator
+types, not what the script does.
+
+Everything shared moved out of the per-example directories:
+
+- `5_applications/diskimages` holds every disk, floppy and tape image, one copy per distinct
+  content. They were compared by what a `.gz` *expands to*, not by name: 96 files held 70 distinct
+  disks, XXDP 2.5 existed three times over. Named `<name>.<medium>.dsk[.gz]`, the medium being the
+  drive the image is mounted in (`rl02`, `rk05`, `rx01`, `ra80`, ...) taken from what the script
+  sets `p type` to. Only the `.gz` is committed; the expanded `.dsk` is ignored.
+- `5_applications/bootloaders` holds the MACRO-11 bootloader and M9312 PROM listings, ten files
+  where the examples carried twenty-four copies.
+
+**`storageimage.cpp` expanded a `.gz` into the wrong directory.** The compressed image is looked for
+next to the script (`scriptpath_resolve`), but the expanded copy was written to the file name as the
+script spells it — relative to the directory `demo` was started in. With images in a shared
+directory that name is `../diskimages/<image>`, so the expansion aimed at a path which need not
+exist, and the run failed unless started from the script's own directory. It now expands next to the
+`.gz` it found and works on that file, which is also where the next run looks. The command handed to
+`system()` is quoted, so a directory with a space in it no longer breaks it.
+
+**Verified**: cross-compile only (`./crossco`, UNIBUS), no hardware run. The path arithmetic of the
+expansion was checked against a real directory tree from a working directory other than the
+script's, where the old form fails with "No such file or directory" and the new one puts the image
+in `diskimages` and finds it again. Every reference in the 34 scripts was checked to resolve, and to
+be satisfiable from a fresh clone: the only ones that are not are volumes created on first use, and
+the RSX11M-PLUS DECUS data disk, 300 MB compressed and over the limit GitHub enforces on a single
+file — excluded on purpose, with `diskimages/rsx11mpv4.6_du1_84.ra80.dsk.gz.txt` recording what it
+is and its checksums.
+
 ### A command script no longer changes the working directory
 
 Running a command file as a script (`demo testseq`, or `./testseq` via `#!`) used to `chdir()` into

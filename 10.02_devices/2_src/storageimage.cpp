@@ -46,6 +46,25 @@
 #include "storageimage.hpp"
 
 
+// Wrap a file name for use in a command line handed to system().
+// Single quotes protect everything the shell would otherwise act on - a space,
+// a "$", a ";" - and a single quote inside the name is closed, escaped and
+// reopened. Image names come from a command script, so they are not arbitrary
+// input, but a directory with a space in it is enough to break an unquoted one.
+static std::string shell_quote(const std::string& path)
+{
+    std::string result = "'" ;
+    for (char c : path) {
+        if (c == '\'')
+            result += "'\\''" ;
+        else
+            result += c ;
+    }
+    result += "'" ;
+    return result ;
+}
+
+
 // BIG use of memory
 void storageimage_base_c::set_zero(uint64_t position, unsigned len)
 {
@@ -105,14 +124,28 @@ bool storageimage_binfile_c::open(storagedrive_c *_drive, bool create)
             std::string compressed_image_fname = scriptpath_resolve(image_fname + ".gz") ;
             if (FILE *fz = fopen(compressed_image_fname.c_str(), "r")) {
                 fclose(fz);
-                std::string uncompress_cmd = "zcat " + compressed_image_fname + " >" + image_fname ;
-                printf("Only compressed image file %s found, expanding \"%s\" ...\n", image_fname.c_str(), uncompress_cmd.c_str()) ;
+                // Expand the ".gz" next to itself, and work on the result from
+                // now on. The ".gz" is looked for next to the script, so it may
+                // sit in quite another directory than the name the script
+                // spells: "../diskimages/x.dsk" finds
+                // "<script dir>/../diskimages/x.dsk.gz". Writing the expanded
+                // image to the name as spelled would aim it at the directory
+                // demo was started IN - a path which need not even exist - and
+                // would leave a copy of every image wherever that happened to
+                // be. Next to its own ".gz" it is found again on the next run.
+                std::string expanded_image_fname =
+                    compressed_image_fname.substr(0, compressed_image_fname.size() - 3) ;
+                std::string uncompress_cmd = "zcat " + shell_quote(compressed_image_fname)
+                                             + " >" + shell_quote(expanded_image_fname) ;
+                printf("Only compressed image file %s found, expanding \"%s\" ...\n", compressed_image_fname.c_str(), uncompress_cmd.c_str()) ;
                 int ret = system(uncompress_cmd.c_str()) ;
                 if (ret != 0) {
                     printf(" FAILED!\n") ;
                     retries = 0 ; // not again
-                } else
+                } else {
+                    image_fname = expanded_image_fname ;
                     printf("... complete.\n") ;
+                }
 
             } else
                 retries = 0 ; // not again
