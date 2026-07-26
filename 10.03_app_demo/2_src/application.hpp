@@ -38,6 +38,7 @@
 #include "logsource.hpp"
 #include "getopt2.hpp"
 #include "inputline.hpp"
+#include "pdp11disas.hpp"
 #include "pru.hpp"
 #include "parameter.hpp"
 #include "qunibus.h"
@@ -45,6 +46,26 @@
 
 #define PROGNAME	"demo"
 #define VERSION	"v1.5.0"
+
+// words fetched with one DMA for a code listing, see menu_disassemble.cpp
+#define QUNIBUS_DISASMEMORY_WINDOW_WORDS	64
+
+// QBUS/UNIBUS memory as source for the disassembler, read with DMA
+class qunibus_disasmemory_c: public pdp11disas_memory_c {
+public:
+	qunibus_disasmemory_c();
+	bool get_word(uint32_t addr, uint16_t *word) override;
+private:
+	uint32_t window_startaddr;
+	unsigned window_wordcount;
+	uint16_t window[QUNIBUS_DISASMEMORY_WINDOW_WORDS];
+};
+
+// the shared DDR memory as source for the disassembler, without bus traffic
+class ddrmem_disasmemory_c: public pdp11disas_memory_c {
+public:
+	bool get_word(uint32_t addr, uint16_t *word) override;
+};
 
 class application_c: public logsource_c {
 public:
@@ -85,6 +106,12 @@ public:
 	inputline_c	inputline ;
 	bool script_active() {return inputline.is_file_open();}
 	char *getchoice(const char *menu_code);
+
+	// what the disassembler assumes about the CPU. Lives here, not in a menu,
+	// so a "set cpu" survives leaving and re-entering the menu.
+	pdp11disas_options_c disassembler_options ;
+	uint32_t disassemble(pdp11disas_memory_c &memory, uint32_t startaddr,
+			unsigned instruction_count) ;
 
 	bool emulate_memory(uint32_t endaddr = 0) ;
 

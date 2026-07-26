@@ -110,6 +110,7 @@ OBJECTS = $(OBJDIR)/application.o	\
 	$(OBJDIR)/menu_buslatches.o	\
 	$(OBJDIR)/menu_qunibus_signals.o	\
 	$(OBJDIR)/menu_masterslave.o	\
+	$(OBJDIR)/menu_disassemble.o	\
 	$(OBJDIR)/menu_interrupts.o	\
 	$(OBJDIR)/menu_ddrmem_slave_only.o \
 	$(OBJDIR)/menu_devices.o \
@@ -176,6 +177,7 @@ OBJECTS = $(OBJDIR)/application.o	\
 	$(OBJDIR)/mcout.o	\
 	$(OBJDIR)/inputline.o	\
 	$(OBJDIR)/scriptpath.o	\
+	$(OBJDIR)/pdp11disas.o	\
 	$(OBJDIR)/kbhit.o	\
 	$(OBJDIR)/bitcalc.o	\
 	$(OBJDIR)/pru.o \
@@ -249,6 +251,9 @@ $(OBJDIR)/menu_qunibus_signals.o :  menu_qunibus_signals.cpp application.hpp
 	$(CC) $(CCFLAGS) $< -o $@
 
 $(OBJDIR)/menu_masterslave.o :  menu_masterslave.cpp application.hpp
+	$(CC) $(CCFLAGS) $< -o $@
+
+$(OBJDIR)/menu_disassemble.o :  menu_disassemble.cpp application.hpp
 	$(CC) $(CCFLAGS) $< -o $@
 
 $(OBJDIR)/menu_interrupts.o :  menu_interrupts.cpp application.hpp
@@ -443,6 +448,9 @@ $(OBJDIR)/inputline.o :  $(COMMON_SRC_DIR)/inputline.cpp $(COMMON_SRC_DIR)/input
 	$(CC) $(CCFLAGS) -xc++ $< -o $@
 
 $(OBJDIR)/scriptpath.o :  $(COMMON_SRC_DIR)/scriptpath.cpp $(COMMON_SRC_DIR)/scriptpath.hpp
+	$(CC) $(CCFLAGS) $< -o $@
+
+$(OBJDIR)/pdp11disas.o :  $(COMMON_SRC_DIR)/pdp11disas.cpp $(COMMON_SRC_DIR)/pdp11disas.hpp
 	$(CC) $(CCFLAGS) $< -o $@
 
 $(OBJDIR)/kbhit.o :  $(COMMON_SRC_DIR)/kbhit.c $(COMMON_SRC_DIR)/kbhit.h

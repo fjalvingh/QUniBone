@@ -25,6 +25,7 @@ manual says so.
   - [Main menu](#main-menu)
   - [Device menu (`d` / `dc`)](#device-menu-d--dc)
   - [Bus master / memory menu (`tm` / `m`)](#bus-master--memory-menu-tm--m)
+    - [Disassembling memory](#disassembling-memory)
   - [Other menus](#other-menus)
 - [Working with devices](#working-with-devices)
 - [Device index](#device-index)
@@ -171,10 +172,74 @@ once a controller is selected with `sd`.
 | `e <addr> [n]` / `e` | EXAMINE `n` words at `<addr>`, or a single word at the next address. |
 | `d <addr> <val> …` / `d <val>` | DEPOSIT values from `<addr>`, or one value at the next address. |
 | `xe` / `xd` | Like EXAMINE/DEPOSIT, but as a local access into DDR memory (only inside the emulated range; the CPU cache is not updated on `xd`). |
+| `da <addr> [n]` / `da` | DISASSEMBLE `n` instructions at `<addr>`, or continue where the last listing stopped. See below. |
+| `xda <addr> [n]` / `xda` | Like DISASSEMBLE, but as a local access into DDR memory. |
+| `set` | Show the CPU model and instruction set options DISASSEMBLE decodes for, and list what can be set. |
+| `set cpu <model>` | Set the CPU model, e.g. `set cpu 11/34`. Default `11/20`. |
+| `set <option> <0\|1>` | Add or remove a single instruction set option, e.g. `set fp11 1`. |
 | `lb`/`ll`/`lp`/`lt` `<filename>` | Load memory from a binary image / MACRO-11 listing / absolute papertape / address-value text file. |
 | `s <filename>` | Save the memory content to a binary file. |
 | `ta` / `tr` `[<start> <end>]` | Test memory: address-into-each-word, or random. |
 | `init`, `pwr`, `h <1\|0>`, `dbg c\|s\|f`, `i`, `q` | As in the device menu. |
+
+#### Disassembling memory
+
+`da` prints ten instructions, then waits: ENTER shows the next ten, ESC (or any other key) ends the
+listing. Without `<n>` it goes on until you stop it; with `<n>` it stops after that many
+instructions, still ten at a time. A `da` without an address continues behind the last instruction
+printed, so a listing can be walked through page by page. The address of `da` is its own — EXAMINE
+and DEPOSIT keep theirs.
+
+Each line shows the address, the one to three words the instruction occupies, and the instruction in
+lower case:
+
+```
+001000  012706 001776         mov     #001776,sp
+001004  012701 174400         mov     #174400,r1
+001010  105711                tstb    (r1)
+001012  100376                bpl     001010
+001014  070001                mul     r1,r0           ; eis not on pdp-11/20
+```
+
+The last line is what `set` is for. A PDP-11/20 has no EIS, so `mul` is disassembled but marked as
+an instruction this machine would trap on. `set cpu 11/34` makes the comment go away; on an 11/20 a
+word like that is much more likely to be data than code. The model brings the instruction sets it
+was built with; what was an *option* on the real machine is switched on separately, because the
+disassembler cannot know whether the box had it:
+
+| Option | Instructions |
+|---|---|
+| `eis` | `mul` `div` `ash` `ashc` |
+| `fis` | `fadd` `fsub` `fmul` `fdiv` (KE11-F, KEV11) |
+| `fp11` | the FP11 floating point instructions, `170000`–`177777` |
+| `cis` | the commercial instruction set, `076xxx`, `l2dr`, `l3dr` |
+| `mmu` | `mfpi` `mtpi` `mfpd` `mtpd` |
+| `mfps` | `mfps` `mtps` |
+| `spl` | `spl` |
+| `sxs` | `sxt` `xor` `sob` |
+| `mark`, `rtt`, `mfpt`, `csm`, `tswlk` | the single instructions of those names (`tswlk` = `tstset`/`wrtlck`) |
+| `fpd`, `fpl` | not an instruction set: print the FP11 `d`/`l` mnemonics (`clrd` for `clrf`, `stcfl` for `stcfi`) instead of the `f`/`i` ones — which of the two an instruction really is only the live FPS register says. |
+
+Known models are `11/03` `11/04` `11/05` `11/10` `11/15` `11/20` `11/23` `11/24` `11/34` `11/35`
+`11/40` `11/44` `11/45` `11/50` `11/53` `11/55` `11/60` `11/70` `11/73` `11/83` `11/84` `11/93`
+`11/94` and `t11`; `11/34`, `1134` and `34` all name the same one. `set cpu` resets the options to
+the model's own set, so set the model first and the options after:
+
+```
+set cpu 11/34
+set fp11 1
+da 010000 40
+```
+
+A word which is no instruction at all is printed as `.word`, and the in-line CIS instructions
+(`movci`, `addni`, …) occupy only their opcode word here: their descriptors follow as data and are
+listed as such.
+
+Inside a command script `da` never asks — it prints the whole region at once, so a script is not
+consumed as key presses.
+
+The disassembler itself is `90_common/src/pdp11disas.cpp` and has no dependency on the bus or the
+board, so anything else in the tree can produce a listing the same way.
 
 ### Other menus
 

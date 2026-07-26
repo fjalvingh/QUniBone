@@ -87,6 +87,13 @@ p ctf /tmp/trace.csv
 p s 1
 ```
 
+To read the code itself rather than the cycles it produced, leave the device menu and disassemble it
+in the bus master/memory menu: `da 010234` lists ten instructions from the breakpoint address,
+ENTER shows the next ten. Tell it which machine it is looking at first — `set cpu 11/20` or
+`set cpu 11/34` to match the enabled CPU — otherwise instructions the core does have are marked as
+unavailable, or the other way round. See
+[Disassembling memory](README.md#disassembling-memory).
+
 ## Testing the cores without hardware
 
 The CPU cores are plain C and reach the outside world only through the ten `unibone_*()` functions

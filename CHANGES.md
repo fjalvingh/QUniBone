@@ -2,6 +2,54 @@
 
 Notable changes to QUniBone, newest first.
 
+### A PDP-11 disassembler, and `da` to list a code region
+
+`demo` could EXAMINE memory, but only as octal words: memory holding *code* was unreadable without a
+listing of the program next to it. There was no disassembler anywhere in the tree — the CPU cores
+decode with a chain of `switch` statements and no name table, and their `TR()` trace macros print a
+bare mnemonic without operands.
+
+- `90_common/src/pdp11disas.cpp` / `.hpp` is a new, reusable disassembler. `pdp11disas_instruction()`
+  decodes one instruction, `pdp11disas_region()` calls it repeatedly — which is all a code listing
+  is, because on a PDP-11 an instruction is only as long as its operands make it. It has no
+  QUniBone dependency at all: no bus, no PRU, no logger, no threads. Memory comes in through
+  `pdp11disas_memory_c`, which the caller implements over whatever it has, so the module is usable
+  from any part of the tree and testable on the build machine.
+- It covers the whole publicly documented instruction set: base, EIS, FIS, FP11, CIS, the MMU
+  instructions, `mfps`/`mtps`, `spl`, `sxt`/`xor`/`sob`, `mark`, `rtt`, `mfpt`, `csm`,
+  `tstset`/`wrtlck`. `pdp11disas_options_c` holds a CPU model (11/03 … 11/94, T-11) and the
+  instruction sets installed with it; an instruction outside that set is still disassembled but
+  marked, e.g. `mul r1,r0 ; eis not on pdp-11/20`. The default is a PDP-11/20 with nothing added,
+  the smallest instruction set — so nothing is silently accepted which the machine could not
+  execute.
+- The opcode table is a port of the disassembler of pdp11gui (`common/Pdp11DisasU.pas`), whose table
+  came from SimH's `pdp11_sys.c`; the per-model instruction sets follow SimH's feature sets
+  (`pdp11_defs.h`, `pdp11_cpumod.h`). Two entries deviate on purpose: SimH has a copy-paste
+  duplicate at the condition code opcodes `000256` and `000276`, where the bit encoding says
+  `cln clz clv` and `sen sez sev`.
+- New commands in the bus master/memory menu (`tm`/`m`, `10.03_app_demo/2_src/menu_masterslave.cpp`):
+  `da <addr> [n]` disassembles over the bus, `xda` the same in local DDR memory, ten instructions at
+  a time — ENTER for the next page, ESC to stop. `da` without an address continues where the last
+  listing stopped, and keeps its own address so EXAMINE/DEPOSIT are undisturbed. `set cpu <model>`
+  and `set <option> <0|1>` choose what is decoded for; the setting lives in `application_c`, so it
+  survives leaving the menu.
+- `10.03_app_demo/2_src/menu_disassemble.cpp` is the new file connecting the two: the bus memory
+  (one DMA fills a 64 word window instead of one DATI per word) and the DDR memory, plus the paged
+  output. In a command script the pager never asks, otherwise it would eat the script's next command
+  line.
+- `os_getkey()` in `90_common/src/kbhit.c` is a blocking single-key read next to the existing
+  non-blocking `os_kbhit()`; the tree had no way to wait for one key.
+- `90_common/test/pdp11disas_test.cpp` is a new unit test in the build-machine suite: 674 cases over
+  every addressing mode, every operand class, every instruction set option, the availability
+  flagging, unreadable memory and the instruction *lengths* — a wrong length does not produce one
+  wrong line, it derails everything after it.
+
+Verified: cross-compile of both the UNIBUS and the QBUS build, the unit test as part of
+`./compile.sh` / `./crossco`, and — the real check — the disassembly of the M9312 boot ROMs
+`10.02_devices/5_boot/dl.mac` and `du.mac` compared line by line against the MACRO-11 `.lst` files
+next to them, which match including all branch targets and instruction lengths. The menu commands
+themselves are not yet tested on real hardware.
+
 ### A manual for `demo` and every emulated device
 
 `manual/` is a new directory of Markdown pages describing how the application is used. Until now the
