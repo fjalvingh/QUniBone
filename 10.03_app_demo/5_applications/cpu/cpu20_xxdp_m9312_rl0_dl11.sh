@@ -10,7 +10,7 @@ en kw11			# enable KW11 on DL11-W
 
 sd m9312		# further commands form M9312
 p bl DIAG		# set start label to console emulator entry 765020
-p cer 23-248F1.lst	# plug console emulator ROM into socket
+p cer ../bootloaders/23-248F1.lst	# plug console emulator ROM into socket
 p br1 23-756A9.lst	# plug RK BOOT ROM into socket1
 p br2 23-751A9.lst	# plug RL BOOT ROM into socket2
 p br3 23-767A9.lst	# plug MSCP DU BOOT ROM into socket3

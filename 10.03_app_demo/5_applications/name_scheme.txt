@@ -14,10 +14,13 @@ rx01, rx02, mscp. Directories without a medium hold something else: "cpu" the
 emulated PDP-11/20, "memory" the memory emulation, "m9312" the boot ROM,
 "unixv1" the single UNIX V1 setup.
 
-An example directory holds only what belongs to the setup: its scripts, the
-bootloader and ROM listings (*.lst) it deposits, a MACRO-11 source, a papertape
-(*.ptap, *.abs), a SimH configuration for comparison. No disk images - those all
-live in "diskimages", see below.
+An example directory holds only what belongs to that setup alone: its scripts, a
+MACRO-11 source or program it is the only user of (serial.lst, zkma.ptap,
+ZQKC_E_05_20.abs), a SimH configuration for comparison. What several examples
+share sits in a directory of its own beside them:
+
+	diskimages	every disk, floppy and tape image
+	bootloaders	the bootloader and boot-ROM listings a script deposits
 
 
 Scripts
@@ -36,15 +39,17 @@ any more. The script IS the demo command file and starts with
 so it runs as "sudo ./rt11v5.5.dlx.sh", with further options if wanted. demo
 ignores the "#!" line as it ignores any line starting with "#". A file the
 script names is looked up next to the script, so no "cd" and no absolute paths
-are needed: a listing as "dl.lst", an image as "../diskimages/<image>". Files
-the run creates land in the directory it was started from.
+are needed: "../bootloaders/dl.lst", "../diskimages/<image>", or a plain name
+for the one file that belongs to this example alone. Files the run creates land
+in the directory it was started from.
 
 <OS><version>	rt11v5.5, rsx11m4.8, unixv6, xxdp22-25, mini-unix, 211BSD.
 		A script that serves two versions names both: xxdp22-25.
 <pdp11-model>	The PDP-11 the setup is for, when it matters: _34, _44, _84,
 		_05, _20. Omitted when the setup is model independent.
 <boot device>	The DEC bootstrap mnemonic of the drive booted from, which is
-		also the name of the bootloader listing the script deposits:
+		also the name of the bootloader listing the script deposits
+		from "bootloaders":
 			dl	RL11 / RL01, RL02	dl.lst
 			dk	RK11 / RK05		dk.lst
 			du	MSCP (UDA50, RA..)	du.lst
@@ -134,3 +139,37 @@ Every image has its ".gz", so a fresh checkout has every disk an example needs.
 
 mini-unix-tape0.bin.dsk is the one file in "diskimages" that is not a disk: it
 is the Mini-UNIX bootstrap tape, no script mounts it, and it kept its ".bin".
+
+
+Bootloaders
+-----------
+"bootloaders" holds one copy of each MACRO-11 listing a script deposits into
+memory, and every script reaches it the same way:
+
+	m ll ../bootloaders/dl.lst
+
+Ten files, where the examples used to carry twenty-four copies between them -
+dl.lst alone existed five times. The name is the boot device code of the drive
+the listing boots from, so a script and its bootloader spell the same thing:
+
+	dl.lst		RL11 / RL01, RL02	dy.lst		RX211 / RX02
+	dk.lst		RK11 / RK05		rf11.lst	RF11 / RS11
+	du.lst		MSCP (UDA50, RA..)
+	dx.lst		RX11 / RX01
+
+Each is a modified copy of the DEC M9312 boot PROM for its controller, with one
+entry address per unit: 10000 boots unit 0, 10010 unit 1, and so on. A "d"
+script cannot start a real PDP-11, so it deposits the listing, prints those
+addresses and leaves the rest to the operator.
+
+The four 23-*.lst are the original M9312 PROM listings, used by the m9312
+emulation rather than deposited into memory:
+
+	23-248F1.lst	console / diagnostic PROM, plugged in with "p cer"
+	23-751A9.lst	'DL' boot PROM, RL11
+	23-756A9.lst	'DK/DT' boot PROM, RK03/05 and TU55/56
+	23-767A9.lst	'DU' boot PROM, MSCP
+
+Not here, because one example alone uses each: cpu/serial.lst (a serial I/O
+test, not a bootloader), cpu/ZQKC_E_05_20.abs and memory/zkma.ptap (MAINDEC
+diagnostics, loaded with "m lp" and "lp").

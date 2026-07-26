@@ -14,7 +14,7 @@ pwr
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll dx.lst
+m ll ../bootloaders/dx.lst
 
 en rx			# enable RX11 controller
 en rxbox

@@ -10,7 +10,7 @@ pwr			# reboot PDP-11
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll dl.lst
+m ll ../bootloaders/dl.lst
 
 en rl			# enable RL11 controller
 

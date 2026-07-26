@@ -14,7 +14,7 @@ pwr
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll dy.lst
+m ll ../bootloaders/dy.lst
 
 en ry			# enable RX11 controller
 en rybox

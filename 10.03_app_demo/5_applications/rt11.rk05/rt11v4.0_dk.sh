@@ -10,7 +10,7 @@ pwr			# reboot PDP-11
 m i			# install max  memory
 
 # Deposit bootloader into memory
-m ll dk.lst
+m ll ../bootloaders/dk.lst
 
 en rk			# enable RK11 controller
 

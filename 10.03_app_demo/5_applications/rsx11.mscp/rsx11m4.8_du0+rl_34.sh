@@ -6,7 +6,7 @@ pwr
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll du.lst
+m ll ../bootloaders/du.lst
 
 en uda			# enable UDA50 controller
 

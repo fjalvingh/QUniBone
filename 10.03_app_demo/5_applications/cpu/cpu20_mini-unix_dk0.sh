@@ -9,7 +9,7 @@ pwr
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll dk.lst
+m ll ../bootloaders/dk.lst
 
 en rk			# enable RK11 controller
 

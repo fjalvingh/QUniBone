@@ -14,7 +14,7 @@ en kw11			# enable KW11 on DL11-W
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll rf11.lst
+m ll ../bootloaders/rf11.lst
 
 
 en ke                   # enable PDP-11/20 EAE

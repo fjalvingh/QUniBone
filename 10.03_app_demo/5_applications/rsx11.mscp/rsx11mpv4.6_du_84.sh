@@ -6,7 +6,7 @@ pwr			# reboot PDP-11
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll du.lst
+m ll ../bootloaders/du.lst
 
 en uda
 
