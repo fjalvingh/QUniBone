@@ -39,10 +39,21 @@ bare mnemonic without operands.
   line.
 - `os_getkey()` in `90_common/src/kbhit.c` is a blocking single-key read next to the existing
   non-blocking `os_kbhit()`; the tree had no way to wait for one key.
-- `90_common/test/pdp11disas_test.cpp` is a new unit test in the build-machine suite: 674 cases over
+- The listing also names the **well known addresses**. When an operand is an absolute `@#nnnnnn`, a
+  pc-relative `nnnnnn`/`@nnnnnn`, or an immediate `#nnnnnn` inside the I/O page, the line says what
+  that address is: `mov #174400,r1 ; 174400 = rl11 rlcs (control/status)`. The table holds the trap
+  and interrupt vectors `000`–`274`, the processor and memory management registers of the 11/45 and
+  11/70 — the PAR/PDR blocks named per space and per page, the general register block at `177700` —
+  and the standard CSRs of the common controllers. Sources are the DEC handbooks, `kt11d.c` for the
+  MMU blocks, the register sets of the emulations in `10.02_devices/2_src` for the devices QUniBone
+  has, and SimH's autoconfigure table for the rest. `pdp11disas_address_info()` is public, so an
+  EXAMINE or a bus trace can name an address the same way. Small immediates are deliberately not
+  annotated (`mov #4,r0` loads a 4, it is not the bus error vector), and ROM ranges are not in the
+  table at all — they would comment every second line of a listing of the code inside them.
+- `90_common/test/pdp11disas_test.cpp` is a new unit test in the build-machine suite: 754 cases over
   every addressing mode, every operand class, every instruction set option, the availability
-  flagging, unreadable memory and the instruction *lengths* — a wrong length does not produce one
-  wrong line, it derails everything after it.
+  flagging, the address annotations, unreadable memory and the instruction *lengths* — a wrong
+  length does not produce one wrong line, it derails everything after it.
 
 Verified: cross-compile of both the UNIBUS and the QBUS build, the unit test as part of
 `./compile.sh` / `./crossco`, and — the real check — the disassembly of the M9312 boot ROMs

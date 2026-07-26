@@ -156,6 +156,9 @@ public:
 	bool available = false;		// known, and required_options all present
 	bool truncated = false;		// a word of the instruction is not readable
 	std::string cpu_model;		// the model it was disassembled for, for the comment
+	// addresses named by the operands which have a well known meaning:
+	// device registers, MMU/CPU registers, trap and interrupt vectors
+	std::vector<uint32_t> known_addresses;
 
 	// "mov     #001776,sp", with "; ..." appended if something is wrong
 	std::string text(void) const;
@@ -164,6 +167,13 @@ public:
 	// the comment alone, "" if the instruction is plain and available
 	std::string comment(void) const;
 };
+
+// What the address <addr> is on a PDP-11: a device register, a processor or
+// memory management register, or a trap/interrupt vector. "" if <addr> means
+// nothing in particular. Only the low 16 bits are looked at.
+// Usable on its own - EXAMINE, a memory dump or a bus trace can name an
+// address with it just as well.
+std::string pdp11disas_address_info(uint32_t addr);
 
 // Disassemble the instruction at <addr>. Returns the address of the next one.
 // *result is always filled; result->wordcount == 0 means <addr> itself could

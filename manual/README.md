@@ -26,6 +26,7 @@ manual says so.
   - [Device menu (`d` / `dc`)](#device-menu-d--dc)
   - [Bus master / memory menu (`tm` / `m`)](#bus-master--memory-menu-tm--m)
     - [Disassembling memory](#disassembling-memory)
+    - [Well known addresses](#well-known-addresses)
   - [Other menus](#other-menus)
 - [Working with devices](#working-with-devices)
 - [Device index](#device-index)
@@ -234,6 +235,42 @@ da 010000 40
 A word which is no instruction at all is printed as `.word`, and the in-line CIS instructions
 (`movci`, `addni`, …) occupy only their opcode word here: their descriptors follow as data and are
 listed as such.
+
+#### Well known addresses
+
+When an operand names an address the PDP-11 architecture gives a meaning to, the listing says what
+it is — device registers, the memory management and processor registers, and the trap/interrupt
+vectors:
+
+```
+165524  105737 177560         tstb    @#177560        ; 177560 = console dl11 rcsr (receiver status)
+165534  153702 177562         bisb    @#177562,r2     ; 177562 = console dl11 rbuf (receiver buffer)
+165714  012737 165722 000004  mov     #165722,@#000004 ; 000004 = bus error, odd address, stack limit vector
+010040  012701 174400         mov     #174400,r1      ; 174400 = rl11 rlcs (control/status)
+005000  005037 172344         clr     @#172344        ; 172344 = kernel i-space par 2
+```
+
+Three operand forms carry a usable address, and all three are annotated: the absolute `@#nnnnnn`,
+the pc-relative `nnnnnn` and `@nnnnnn`, and an immediate `#nnnnnn` — the last one only when the
+value is inside the I/O page (`160000`–`177777`), because `mov #4,r0` loads a 4 and does not mean
+the bus error vector. What a register holds cannot be known statically, so `(r1)` and `4(r1)` are
+never annotated; `mov #174400,r1` two instructions earlier is what tells you which device `(r1)` is.
+
+The PAR/PDR blocks are named per page and per space, so `172344` reads as `kernel i-space par 2`
+rather than as a number. A byte access to the high half of a register says so, and the second word
+of a vector is marked `new psw`. Both comment kinds can appear at once:
+
+```
+006200  006537 177572         mfpi    @#177572        ; mmu not on pdp-11/20, 177572 = mmr0 (memory management register 0)
+```
+
+The list covers the vectors `000`–`274`, the processor and memory management registers of the
+11/45 and 11/70 (including the general register block at `177700`), and the standard CSR addresses
+of the common controllers — RL11, RK11, RF11, RX11/RX211, UDA50/MSCP, DL11, KW11-L/P, KE11-A, PC11,
+LP11, TM11, TC11, RH11/RP11, CR11, RC11/RK611, DEUNA/DEQNA, TA11/TQK50. ROM ranges are deliberately
+*not* in it: they would put a comment on every second line of a listing of the code inside them.
+`pdp11disas_address_info()` gives the same answer to any other part of the tree that wants to name
+an address.
 
 Inside a command script `da` never asks — it prints the whole region at once, so a script is not
 consumed as key presses.

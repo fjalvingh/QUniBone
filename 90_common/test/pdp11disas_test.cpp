@@ -186,7 +186,8 @@ int main(int argc, char **argv)
 	one1(all, "pc as plain register", 0010700, "mov     pc,r0");
 	// the pc modes
 	one(all, "immediate", 0012700, 0000377, 0, 2, "mov     #000377,r0");
-	one(all, "absolute", 0013700, 0177570, 0, 2, "mov     @#177570,r0");
+	one(all, "absolute", 0013700, 0177570, 0, 2,
+			"mov     @#177570,r0     ; 177570 = console switch register / display register");
 	// relative: target = address of the word after the offset word + offset
 	one(all, "relative", 0016700, 0000004, 0, 2, "mov     001010,r0");
 	one(all, "relative deferred", 0017700, 0000004, 0, 2, "mov     @001010,r0");
@@ -194,7 +195,8 @@ int main(int argc, char **argv)
 	// destination operand, and both at once: two extra words
 	one(all, "mode 6 dst", 0010160, 0000004, 0, 2, "mov     r1,000004(r0)");
 	one(all, "two index words", 0016564, 0000004, 0000010, 3, "mov     000004(r5),000010(r4)");
-	one(all, "immediate and absolute", 0012737, 0000100, 0177566, 3, "mov     #000100,@#177566");
+	one(all, "immediate and absolute", 0012737, 0000100, 0177566, 3,
+			"mov     #000100,@#177566 ; 177566 = console dl11 xbuf (transmitter buffer)");
 	// the classic: mov #x,sp
 	one(all, "mov #1776,sp", 0012706, 0001776, 0, 2, "mov     #001776,sp");
 
@@ -227,7 +229,8 @@ int main(int argc, char **argv)
 	one1(all, "asl", 0006300, "asl     r0");
 	one1(all, "clrb", 0105000, "clrb    r0");
 	one1(all, "tstb", 0105737 - 037, "tstb    r0");
-	one(all, "tstb @#", 0105737, 0177560, 0, 2, "tstb    @#177560");
+	one(all, "tstb @#", 0105737, 0177560, 0, 2,
+			"tstb    @#177560        ; 177560 = console dl11 rcsr (receiver status)");
 	one1(all, "aslb", 0106300, "aslb    r0");
 	one1(all, "swab", 0000300, "swab    r0");
 	one(all, "jmp absolute", 0000137, 0001234, 0, 2, "jmp     @#001234");
@@ -441,6 +444,111 @@ int main(int argc, char **argv)
 	}
 
 	/**********************************************************
+	 * the well known addresses
+	 **********************************************************/
+	// the lookup on its own
+	check("addr 177776", "psw (processor status word)", pdp11disas_address_info(0177776));
+	check("addr 177570", "console switch register / display register",
+			pdp11disas_address_info(0177570));
+	check("addr 177572", "mmr0 (memory management register 0)", pdp11disas_address_info(0177572));
+	check("addr 172516", "mmr3 (memory management register 3)", pdp11disas_address_info(0172516));
+	// the PAR/PDR blocks, by mode, space and page number
+	check("addr 172300", "kernel i-space pdr 0", pdp11disas_address_info(0172300));
+	check("addr 172316", "kernel i-space pdr 7", pdp11disas_address_info(0172316));
+	check("addr 172320", "kernel d-space pdr 0", pdp11disas_address_info(0172320));
+	check("addr 172340", "kernel i-space par 0", pdp11disas_address_info(0172340));
+	check("addr 172352", "kernel i-space par 5", pdp11disas_address_info(0172352));
+	check("addr 172376", "kernel d-space par 7", pdp11disas_address_info(0172376));
+	check("addr 172200", "supervisor i-space pdr 0", pdp11disas_address_info(0172200));
+	check("addr 172276", "supervisor d-space par 7", pdp11disas_address_info(0172276));
+	check("addr 177600", "user i-space pdr 0", pdp11disas_address_info(0177600));
+	check("addr 177640", "user i-space par 0", pdp11disas_address_info(0177640));
+	check("addr 177676", "user d-space par 7", pdp11disas_address_info(0177676));
+	// devices
+	check("addr 177560", "console dl11 rcsr (receiver status)", pdp11disas_address_info(0177560));
+	check("addr 177566", "console dl11 xbuf (transmitter buffer)",
+			pdp11disas_address_info(0177566));
+	check("addr 174400", "rl11 rlcs (control/status)", pdp11disas_address_info(0174400));
+	check("addr 174406", "rl11 rlmp (multipurpose)", pdp11disas_address_info(0174406));
+	check("addr 177400", "rk11 rkds (drive status)", pdp11disas_address_info(0177400));
+	check("addr 177460", "rf11 dcs (control/status)", pdp11disas_address_info(0177460));
+	check("addr 177170", "rx11/rx211 rxcs (command and status)", pdp11disas_address_info(0177170));
+	check("addr 172150", "uda50/rqdx mscp ip (init and poll)", pdp11disas_address_info(0172150));
+	check("addr 177546", "kw11-l lks (line clock status)", pdp11disas_address_info(0177546));
+	check("addr 177300", "ke11-a div (divide)", pdp11disas_address_info(0177300));
+	// the general register block: one byte address each
+	check("addr 177700", "register r0, set 0", pdp11disas_address_info(0177700));
+	check("addr 177705", "register r5, set 0", pdp11disas_address_info(0177705));
+	check("addr 177706", "kernel stack pointer", pdp11disas_address_info(0177706));
+	check("addr 177707", "pc", pdp11disas_address_info(0177707));
+	check("addr 177710", "register r0, set 1", pdp11disas_address_info(0177710));
+	check("addr 177717", "user stack pointer", pdp11disas_address_info(0177717));
+	// a byte access to the high half of a register
+	check("addr 177561", "console dl11 rcsr (receiver status), high byte",
+			pdp11disas_address_info(0177561));
+	// vectors, both words of them
+	check("addr 000004", "bus error, odd address, stack limit vector",
+			pdp11disas_address_info(0000004));
+	check("addr 000006", "bus error, odd address, stack limit vector, new psw",
+			pdp11disas_address_info(0000006));
+	check("addr 000024", "power fail vector", pdp11disas_address_info(0000024));
+	check("addr 000060", "console dl11 receiver vector", pdp11disas_address_info(0000060));
+	check("addr 000064", "console dl11 transmitter vector", pdp11disas_address_info(0000064));
+	check("addr 000100", "kw11-l line clock vector", pdp11disas_address_info(0000100));
+	check("addr 000160", "rl11 vector", pdp11disas_address_info(0000160));
+	check("addr 000220", "rk11 disk vector", pdp11disas_address_info(0000220));
+	check("addr 000250", "memory management abort vector", pdp11disas_address_info(0000250));
+	check("addr 000044", "system software vector 1", pdp11disas_address_info(0000044));
+	// addresses which mean nothing
+	check("addr 001000 unknown", "", pdp11disas_address_info(0001000));
+	check("addr 000400 unknown", "", pdp11disas_address_info(0000400));
+	check("addr 160000 unknown", "", pdp11disas_address_info(0160000));
+	check("addr 177414 unknown", "", pdp11disas_address_info(0177414));
+
+	// ... and how they reach the listing
+	one(all, "absolute device register", 0005037, 0177572, 0, 2,
+			"clr     @#177572        ; 177572 = mmr0 (memory management register 0)");
+	one(all, "immediate device address", 0012701, 0174400, 0, 2,
+			"mov     #174400,r1      ; 174400 = rl11 rlcs (control/status)");
+	one(all, "byte access, high byte", 0105737, 0177561, 0, 2,
+			"tstb    @#177561        ; 177561 = console dl11 rcsr (receiver status), high byte");
+	// pc relative to a device register
+	// target = (001000 + 4) + 0176556 = 0177562, mod 2^16
+	one(all, "relative device register", 0016700, 0176556, 0, 2,
+			"mov     177562,r0       ; 177562 = console dl11 rbuf (receiver buffer)");
+	// two operands, two annotations, and the separating space when the
+	// instruction is as wide as the comment column
+	one(all, "vector and a value", 0012737, 0000340, 0000100, 3,
+			"mov     #000340,@#000100 ; 000100 = kw11-l line clock vector");
+	one(all, "two device registers", 0011037, 0177566, 0, 2,
+			"mov     (r0),@#177566   ; 177566 = console dl11 xbuf (transmitter buffer)");
+	// the same register twice is said once
+	one(all, "same register twice", 0013737, 0177560, 0177560, 3,
+			"mov     @#177560,@#177560 ; 177560 = console dl11 rcsr (receiver status)");
+	// a small immediate is a number, not a vector address
+	one(all, "immediate 4 is not the vector", 0012700, 0000004, 0, 2, "mov     #000004,r0");
+	one(all, "immediate 100 is not the vector", 0012700, 0000100, 0, 2, "mov     #000100,r0");
+	// but an absolute reference to a vector is one
+	one(all, "absolute vector", 0005037, 0000100, 0, 2,
+			"clr     @#000100        ; 000100 = kw11-l line clock vector");
+	// an unavailable instruction says both things
+	{
+		pdp11disas_options_c cpu20b;
+		one(cpu20b, "flagged and annotated", 0006537, 0177572, 0, 2,
+				"mfpi    @#177572        ; mmu not on pdp-11/20, "
+				"177572 = mmr0 (memory management register 0)");
+	}
+	// a truncated instruction says nothing about what it might have named
+	{
+		uint16_t words[1] = { 0005037 };
+		pdp11disas_buffermemory_c memory(words, 1, 001000);
+		pdp11disas_instruction_c instr;
+		pdp11disas_instruction(all, memory, 001000, &instr);
+		check("truncated names no address", ".word   005037          ; instruction incomplete, "
+				"memory not readable", instr.text());
+	}
+
+	/**********************************************************
 	 * words which are no instruction, and unreadable memory
 	 **********************************************************/
 	one1(all, "reserved 000010", 0000010, ".word   000010");
@@ -490,7 +598,8 @@ int main(int argc, char **argv)
 		check_unsigned("region next address", 001026, next);
 		check("region line 1", "001000  012706 001776         mov     #001776,sp",
 				instructions[0].listing_line());
-		check("region line 2", "001004  012701 177560         mov     #177560,r1",
+		check("region line 2", "001004  012701 177560         mov     #177560,r1      "
+				"; 177560 = console dl11 rcsr (receiver status)",
 				instructions[1].listing_line());
 		check("region line 3", "001010  105711                tstb    (r1)",
 				instructions[2].listing_line());

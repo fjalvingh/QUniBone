@@ -488,6 +488,240 @@ static const opentry_t optable[] = { //
 #define OPTABLE_COUNT	(sizeof(optable) / sizeof(optable[0]))
 
 /**********************************************************************
+ * the well known addresses
+ *
+ * The trap/interrupt vectors and the I/O page. Sources: the DEC processor
+ * handbooks for the processor and memory management registers, the KT11-D
+ * implementation in 10.02_devices/2_src/cpu34/kt11d.c for the PAR/PDR
+ * blocks, the register sets of the emulations in 10.02_devices/2_src for
+ * the devices QUniBone has, and SimH's autoconfigure table
+ * (PDP11/pdp11_io_lib.c auto_tab[], itself taken from the VMS SYSGEN
+ * table) for the standard CSR addresses and vectors of the rest.
+ *
+ * Only *registers* are listed, no ROM or memory ranges: those would put a
+ * comment on every second line of a listing of the code inside them.
+ **********************************************************************/
+
+typedef struct {
+	uint16_t startaddr;
+	unsigned count;		// consecutive registers this entry covers
+	unsigned step;		// address distance between them
+	const char *name;	// a "%u" in it is replaced by the index in the block
+} addrdescr_t;
+
+// Trap and interrupt vectors. Each is two words: new PC, new PSW.
+static const addrdescr_t vectordescrs[] = { //
+		{ 0000000, 1, 2, "reserved vector" }, //
+				{ 0000004, 1, 2, "bus error, odd address, stack limit vector" }, //
+				{ 0000010, 1, 2, "reserved instruction vector" }, //
+				{ 0000014, 1, 2, "bpt / trace trap vector" }, //
+				{ 0000020, 1, 2, "iot vector" }, //
+				{ 0000024, 1, 2, "power fail vector" }, //
+				{ 0000030, 1, 2, "emt vector" }, //
+				{ 0000034, 1, 2, "trap vector" }, //
+				{ 0000040, 4, 4, "system software vector %u" }, //
+				{ 0000060, 1, 2, "console dl11 receiver vector" }, //
+				{ 0000064, 1, 2, "console dl11 transmitter vector" }, //
+				{ 0000070, 1, 2, "pc11 paper tape reader vector" }, //
+				{ 0000074, 1, 2, "pc11 paper tape punch vector" }, //
+				{ 0000100, 1, 2, "kw11-l line clock vector" }, //
+				{ 0000104, 1, 2, "kw11-p programmable clock vector" }, //
+				{ 0000114, 1, 2, "memory parity error vector" }, //
+				{ 0000120, 1, 2, "deuna/deqna ethernet vector" }, //
+				{ 0000124, 1, 2, "dr11-b vector" }, //
+				{ 0000160, 1, 2, "rl11 vector" }, //
+				{ 0000170, 2, 4, "lp11 line printer vector %u" }, //
+				{ 0000200, 1, 2, "lp11 line printer vector" }, //
+				{ 0000204, 1, 2, "rf11 fixed head disk / rh11 vector" }, //
+				{ 0000210, 1, 2, "rc11 / rk611 vector" }, //
+				{ 0000214, 1, 2, "tc11 dectape vector" }, //
+				{ 0000220, 1, 2, "rk11 disk vector" }, //
+				{ 0000224, 1, 2, "tm11 magtape / rh11 vector" }, //
+				{ 0000230, 1, 2, "cr11 card reader vector" }, //
+				{ 0000240, 1, 2, "pirq program interrupt request vector" }, //
+				{ 0000244, 1, 2, "fp11 floating point exception vector" }, //
+				{ 0000250, 1, 2, "memory management abort vector" }, //
+				{ 0000254, 1, 2, "rh11 / rp11 disk vector" }, //
+				{ 0000260, 1, 2, "ta11 cassette / tqk50 vector" }, //
+				{ 0000264, 1, 2, "rx11 / rx211 floppy vector" }, //
+				{ 0000270, 2, 4, "lp11 line printer vector %u" }, //
+				{ 0, 0, 0, NULL } };
+
+// The I/O page, 160000..177777.
+static const addrdescr_t iopagedescrs[] = { //
+		{ 0172150, 1, 2, "uda50/rqdx mscp ip (init and poll)" }, //
+				{ 0172152, 1, 2, "uda50/rqdx mscp sa (status and address)" }, //
+				{ 0172200, 8, 2, "supervisor i-space pdr %u" }, //
+				{ 0172220, 8, 2, "supervisor d-space pdr %u" }, //
+				{ 0172240, 8, 2, "supervisor i-space par %u" }, //
+				{ 0172260, 8, 2, "supervisor d-space par %u" }, //
+				{ 0172300, 8, 2, "kernel i-space pdr %u" }, //
+				{ 0172320, 8, 2, "kernel d-space pdr %u" }, //
+				{ 0172340, 8, 2, "kernel i-space par %u" }, //
+				{ 0172360, 8, 2, "kernel d-space par %u" }, //
+				{ 0172410, 1, 2, "dr11-b csr" }, //
+				{ 0172440, 1, 2, "rh11/rh70 #2 rpcs1 (control/status 1)" }, //
+				{ 0172516, 1, 2, "mmr3 (memory management register 3)" }, //
+				{ 0172520, 1, 2, "tm11 mts (status)" }, //
+				{ 0172522, 1, 2, "tm11 mtc (command)" }, //
+				{ 0172524, 1, 2, "tm11 mtbrc (byte record counter)" }, //
+				{ 0172526, 1, 2, "tm11 mtcma (current memory address)" }, //
+				{ 0172530, 1, 2, "tm11 mtd (data buffer)" }, //
+				{ 0172532, 1, 2, "tm11 mtrd (tu10 read lines)" }, //
+				{ 0172540, 1, 2, "kw11-p csr (programmable clock)" }, //
+				{ 0172542, 1, 2, "kw11-p count set buffer" }, //
+				{ 0172544, 1, 2, "kw11-p counter" }, //
+				{ 0174400, 1, 2, "rl11 rlcs (control/status)" }, //
+				{ 0174402, 1, 2, "rl11 rlba (bus address)" }, //
+				{ 0174404, 1, 2, "rl11 rlda (disk address)" }, //
+				{ 0174406, 1, 2, "rl11 rlmp (multipurpose)" }, //
+				{ 0174410, 1, 2, "rlv12 rlbae (bus address extension)" }, //
+				{ 0174440, 1, 2, "deqna/delqa csr" }, //
+				{ 0174500, 1, 2, "tqk50 tmscp ip" }, //
+				{ 0174510, 1, 2, "deuna csr" }, //
+				{ 0176700, 1, 2, "rh11/rh70 rpcs1 (control/status 1)" }, //
+				{ 0176702, 1, 2, "rh11/rh70 rpwc (word count)" }, //
+				{ 0176704, 1, 2, "rh11/rh70 rpba (bus address)" }, //
+				{ 0176706, 1, 2, "rh11/rh70 rpda (disk address)" }, //
+				{ 0176710, 1, 2, "rh11/rh70 rpcs2 (control/status 2) / rp11 csr" }, //
+				{ 0176712, 1, 2, "rh11/rh70 rpds (drive status)" }, //
+				{ 0176714, 1, 2, "rh11/rh70 rper1 (error 1)" }, //
+				{ 0177160, 1, 2, "cr11 card reader csr" }, //
+				{ 0177170, 1, 2, "rx11/rx211 rxcs (command and status)" }, //
+				{ 0177172, 1, 2, "rx11/rx211 rxdb (data buffer)" }, //
+				{ 0177300, 1, 2, "ke11-a div (divide)" }, //
+				{ 0177302, 1, 2, "ke11-a ac (accumulator)" }, //
+				{ 0177304, 1, 2, "ke11-a mq (multiplier quotient)" }, //
+				{ 0177306, 1, 2, "ke11-a mul (multiply)" }, //
+				{ 0177310, 1, 2, "ke11-a sc/sr (step count / status)" }, //
+				{ 0177312, 1, 2, "ke11-a nor (normalize)" }, //
+				{ 0177314, 1, 2, "ke11-a lsh (logical shift)" }, //
+				{ 0177316, 1, 2, "ke11-a ash (arithmetic shift)" }, //
+				{ 0177340, 1, 2, "tc11 tcst (status)" }, //
+				{ 0177342, 1, 2, "tc11 tccm (command)" }, //
+				{ 0177344, 1, 2, "tc11 tcwc (word count)" }, //
+				{ 0177346, 1, 2, "tc11 tcba (bus address)" }, //
+				{ 0177350, 1, 2, "tc11 tcdt (data)" }, //
+				{ 0177400, 1, 2, "rk11 rkds (drive status)" }, //
+				{ 0177402, 1, 2, "rk11 rker (error)" }, //
+				{ 0177404, 1, 2, "rk11 rkcs (control/status)" }, //
+				{ 0177406, 1, 2, "rk11 rkwc (word count)" }, //
+				{ 0177410, 1, 2, "rk11 rkba (bus address)" }, //
+				{ 0177412, 1, 2, "rk11 rkda (disk address)" }, //
+				{ 0177416, 1, 2, "rk11 rkdb (data buffer)" }, //
+				{ 0177440, 1, 2, "rc11 / rk611 csr" }, //
+				{ 0177460, 1, 2, "rf11 dcs (control/status)" }, //
+				{ 0177462, 1, 2, "rf11 wc (word count)" }, //
+				{ 0177464, 1, 2, "rf11 cma (current memory address)" }, //
+				{ 0177466, 1, 2, "rf11 dar (disk address)" }, //
+				{ 0177470, 1, 2, "rf11 dae (disk address extension)" }, //
+				{ 0177472, 1, 2, "rf11 dbr (data buffer)" }, //
+				{ 0177474, 1, 2, "rf11 ma (maintenance)" }, //
+				{ 0177476, 1, 2, "rf11 ads (address of disk segment)" }, //
+				{ 0177500, 1, 2, "ta11 cassette csr / qbus doorbell" }, //
+				{ 0177514, 1, 2, "lp11 lps (status)" }, //
+				{ 0177516, 1, 2, "lp11 lpb (data buffer)" }, //
+				{ 0177546, 1, 2, "kw11-l lks (line clock status)" }, //
+				{ 0177550, 1, 2, "pc11 prs (reader status)" }, //
+				{ 0177552, 1, 2, "pc11 prb (reader buffer)" }, //
+				{ 0177554, 1, 2, "pc11 pps (punch status)" }, //
+				{ 0177556, 1, 2, "pc11 ppb (punch buffer)" }, //
+				{ 0177560, 1, 2, "console dl11 rcsr (receiver status)" }, //
+				{ 0177562, 1, 2, "console dl11 rbuf (receiver buffer)" }, //
+				{ 0177564, 1, 2, "console dl11 xcsr (transmitter status)" }, //
+				{ 0177566, 1, 2, "console dl11 xbuf (transmitter buffer)" }, //
+				{ 0177570, 1, 2, "console switch register / display register" }, //
+				{ 0177572, 1, 2, "mmr0 (memory management register 0)" }, //
+				{ 0177574, 1, 2, "mmr1 (instruction length/register change)" }, //
+				{ 0177576, 1, 2, "mmr2 (virtual address of the instruction)" }, //
+				{ 0177600, 8, 2, "user i-space pdr %u" }, //
+				{ 0177620, 8, 2, "user d-space pdr %u" }, //
+				{ 0177640, 8, 2, "user i-space par %u" }, //
+				{ 0177660, 8, 2, "user d-space par %u" }, //
+				// the general registers, one *byte* address each (11/45, 11/70)
+				{ 0177700, 6, 1, "register r%u, set 0" }, //
+				{ 0177706, 1, 1, "kernel stack pointer" }, //
+				{ 0177707, 1, 1, "pc" }, //
+				{ 0177710, 6, 1, "register r%u, set 1" }, //
+				{ 0177716, 1, 1, "supervisor stack pointer" }, //
+				{ 0177717, 1, 1, "user stack pointer" }, //
+				{ 0177740, 1, 2, "low error address register" }, //
+				{ 0177742, 1, 2, "high error address register" }, //
+				{ 0177744, 1, 2, "memory system error register" }, //
+				{ 0177746, 1, 2, "cache control register" }, //
+				{ 0177750, 1, 2, "maintenance register" }, //
+				{ 0177752, 1, 2, "hit/miss register" }, //
+				{ 0177760, 1, 2, "lower size register" }, //
+				{ 0177762, 1, 2, "upper size register" }, //
+				{ 0177764, 1, 2, "system i/d register" }, //
+				{ 0177766, 1, 2, "cpu error register" }, //
+				{ 0177770, 1, 2, "microprogram break register" }, //
+				{ 0177772, 1, 2, "pirq (program interrupt request)" }, //
+				{ 0177774, 1, 2, "stack limit register" }, //
+				{ 0177776, 1, 2, "psw (processor status word)" }, //
+				{ 0, 0, 0, NULL } };
+
+// <descrs> entry covering <addr>, with the index inside its block, else NULL
+static const addrdescr_t *find_addrdescr(const addrdescr_t *descrs, uint16_t addr, unsigned *index)
+{
+	for (unsigned i = 0; descrs[i].name; i++) {
+		if (addr < descrs[i].startaddr)
+			continue;
+		unsigned offset = addr - descrs[i].startaddr;
+		if (offset % descrs[i].step)
+			continue;
+		unsigned idx = offset / descrs[i].step;
+		if (idx < descrs[i].count) {
+			*index = idx;
+			return &descrs[i];
+		}
+	}
+	return NULL;
+}
+
+static std::string addrdescr_text(const addrdescr_t *descr, unsigned index)
+{
+	std::string name(descr->name);
+	size_t pos = name.find("%u");
+	if (pos == std::string::npos)
+		return name;
+	char buffer[16];
+	sprintf(buffer, "%u", index);
+	return name.substr(0, pos) + buffer + name.substr(pos + 2);
+}
+
+std::string pdp11disas_address_info(uint32_t addr)
+{
+	uint16_t a = (uint16_t) addr;
+	unsigned index = 0;
+	const addrdescr_t *descr;
+
+	// The vectors: two words each, the new PC and the new PSW.
+	if (a < 01000) {
+		descr = find_addrdescr(vectordescrs, (uint16_t) (a & ~3), &index);
+		if (descr == NULL)
+			return std::string();
+		std::string result = addrdescr_text(descr, index);
+		if (a & 2)
+			result += ", new psw";
+		if (a & 1)
+			result += ", high byte";
+		return result;
+	}
+
+	descr = find_addrdescr(iopagedescrs, a, &index);
+	if (descr)
+		return addrdescr_text(descr, index);
+	// a byte access to the high half of a register
+	if (a & 1) {
+		descr = find_addrdescr(iopagedescrs, (uint16_t) (a - 1), &index);
+		if (descr && descr->step > 1)
+			return addrdescr_text(descr, index) + ", high byte";
+	}
+	return std::string();
+}
+
+/**********************************************************************
  * formatting helpers
  **********************************************************************/
 
@@ -541,7 +775,20 @@ public:
 	// One 6 bit "mode,register" operand. <integer_reg> false: register mode
 	// names an FP11 accumulator, not a general register.
 	std::string operand(unsigned spec, bool integer_reg);
+	// Remember <addr> for the listing comment if it is a well known one.
+	void note_address(uint16_t addr);
 };
+
+void decoder_c::note_address(uint16_t addr)
+{
+	if (pdp11disas_address_info(addr).empty())
+		return;
+	// both operands may name the same register: say it once
+	for (unsigned i = 0; i < instr->known_addresses.size(); i++)
+		if (instr->known_addresses[i] == addr)
+			return;
+	instr->known_addresses.push_back(addr);
+}
 
 bool decoder_c::fetch(uint16_t *w)
 {
@@ -575,12 +822,19 @@ std::string decoder_c::operand(unsigned spec, bool integer_reg)
 			return "(" + regname(reg) + ")+";
 		if (!fetch(&nval))
 			return std::string();
+		// An immediate is a number, not an address - "mov #4,r0" loads a 4,
+		// it does not mean the bus error vector. Only a value in the I/O page
+		// is annotated: there it is a device address being loaded into a
+		// register, which is how nearly all device drivers start.
+		if (nval >= 0160000)
+			note_address(nval);
 		return "#" + octal(nval, 6);
 	case 3:	// autoincrement deferred, with pc: absolute
 		if (reg != 7)
 			return "@(" + regname(reg) + ")+";
 		if (!fetch(&nval))
 			return std::string();
+		note_address(nval);
 		return "@#" + octal(nval, 6);
 	case 4:	// autodecrement
 		return "-(" + regname(reg) + ")";
@@ -592,12 +846,14 @@ std::string decoder_c::operand(unsigned spec, bool integer_reg)
 		if (reg != 7)
 			return octal(nval, 6) + "(" + regname(reg) + ")";
 		// cursor is now the PC the CPU would add: the word after this one
+		note_address((uint16_t) (nval + cursor));
 		return octal((uint16_t) (nval + cursor), 6);
 	case 7:	// index deferred, with pc: relative deferred
 		if (!fetch(&nval))
 			return std::string();
 		if (reg != 7)
 			return "@" + octal(nval, 6) + "(" + regname(reg) + ")";
+		note_address((uint16_t) (nval + cursor));
 		return "@" + octal((uint16_t) (nval + cursor), 6);
 	}
 	return std::string();	// not reachable, mode is 3 bits
@@ -711,11 +967,13 @@ uint32_t pdp11disas_instruction(const pdp11disas_options_c& options, pdp11disas_
 	}
 
 	if (!decoder.ok) {
-		// an operand word is missing: only the opcode word is certain
+		// an operand word is missing: only the opcode word is certain, and
+		// what the half decoded operands named means nothing
 		result->mnemonic = ".word";
 		result->operands = octal(ir, 6);
 		result->truncated = true;
 		result->wordcount = 1;
+		result->known_addresses.clear();
 		return addr + 2;
 	}
 
@@ -748,15 +1006,25 @@ uint32_t pdp11disas_region(const pdp11disas_options_c& options, pdp11disas_memor
 
 std::string pdp11disas_instruction_c::comment(void) const
 {
+	std::string result;
+
 	if (wordcount == 0)
 		return "memory not readable";
+	// what is wrong with the instruction comes first, then what its operands
+	// point at
 	if (truncated)
-		return "instruction incomplete, memory not readable";
-	if (!known)
-		return std::string();
-	if (!available)
-		return pdp11disas_options_c::options_as_text(required_options) + " not on pdp-" + cpu_model;
-	return std::string();
+		result = "instruction incomplete, memory not readable";
+	else if (known && !available)
+		result = pdp11disas_options_c::options_as_text(required_options) + " not on pdp-"
+				+ cpu_model;
+
+	for (unsigned i = 0; i < known_addresses.size(); i++) {
+		if (!result.empty())
+			result += ", ";
+		result += octal(known_addresses[i], 6) + " = "
+				+ pdp11disas_address_info(known_addresses[i]);
+	}
+	return result;
 }
 
 std::string pdp11disas_instruction_c::text(void) const
@@ -772,9 +1040,13 @@ std::string pdp11disas_instruction_c::text(void) const
 	}
 	std::string note = comment();
 	if (!note.empty()) {
-		// pad the instruction out so the comments line up
-		while (result.length() < 24)
+		// pad the instruction out so the comments line up. An instruction
+		// wider than the column still gets its separating space.
+		if (result.length() >= 24)
 			result += " ";
+		else
+			while (result.length() < 24)
+				result += " ";
 		result += "; " + note;
 	}
 	return result;
