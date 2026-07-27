@@ -97,7 +97,9 @@ Besides menu commands, a script may use these internal directives:
 
 Ready-made examples live in `10.03_app_demo/5_applications/` — one directory per setup
 (`rt11.rl02`, `unixv6.rk05`, `rsx11.mscp`, `cpu20`, `cpu34`, …), with all disk images in
-`5_applications/diskimages` and all bootloader listings in `5_applications/bootloaders`. The
+`5_applications/diskimages` and all bootloader listings in `5_applications/bootloaders`. In the
+source tree they are bus-specific and named `5_applications_u` (UNIBUS) and `5_applications_q`
+(QBUS); installation copies the set that fits the hardware into plain `5_applications`. The
 naming rules are written down in `5_applications/name_scheme.txt`. Reading one of those scripts is
 the fastest way to see a complete device setup.
 

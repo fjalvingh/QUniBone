@@ -57,9 +57,12 @@ you started it from.
 
 ### Ready-to-run example applications
 
-`10.03_app_demo/5_applications` now holds the ready-made setups themselves — RT-11, RSX-11M, UNIX V6,
-2.11BSD, XXDP and more — each a single executable script, run as `sudo ./rt11v5.5.dlx.sh`. Their disk
-images and bootloaders are shared between the examples, kept compressed, and unpacked on first use.
+`10.03_app_demo/5_applications_u` now holds the ready-made setups themselves — RT-11, RSX-11M, UNIX
+V6, 2.11BSD, XXDP and more — each a single executable script, run as `sudo ./rt11v5.5.dlx.sh`. Their
+disk images and bootloaders are shared between the examples, kept compressed, and unpacked on first
+use. The examples are bus-specific, so they carry the usual `_u`/`_q` suffix: these are the UNIBUS
+ones, and installing on the hardware (`qunibone-platform.sh`) copies the set that fits into plain
+`5_applications`, which is the directory every path below refers to.
 
 Each example used to be a `.sh` wrapper plus the `.cmd` file it started, beside its own copies of the
 disk images and bootloader listings it needed — the XXDP 2.5 disk existed three times over, `dl.lst`

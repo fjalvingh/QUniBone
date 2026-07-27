@@ -88,7 +88,8 @@ function link4dir() {
 # fix
 # GITHUB: contains both UniBone and QUniBone
 # 10.03_app_demo/5_applications are sorted into
-#       "...5_applications" (identical for UNIBUS and QBUS machines)
+#       "...5_applications" (identical for UNIBUS and QBUS machines,
+#        may be absent - the examples are bus-specific)
 # and   "...5_applications_q" (runs only on QBUS)
 # and   "...5_applications_u" (runs only on UNIBUS)
 
@@ -96,9 +97,17 @@ function link4dir() {
 # if UniBone: copy 5_applications_u/* to 5_applications,
 # if QBone: copy 5_applications_q/* to 5_applications,
 
-echo "Copying 5_applications$QUNIBONE_PLATFORM_SUFFIX to 5_applications"
-# (recursive move faster, but complicate directory merge)
-cp -f -a $HOME/10.03_app_demo/5_applications$QUNIBONE_PLATFORM_SUFFIX/* $HOME/10.03_app_demo/5_applications
+appdir=$HOME/10.03_app_demo/5_applications
+platform_appdir=$appdir$QUNIBONE_PLATFORM_SUFFIX
+mkdir -p $appdir
+if [ -d "$platform_appdir" ] ; then
+  echo "Copying 5_applications$QUNIBONE_PLATFORM_SUFFIX to 5_applications"
+  # (recursive move faster, but complicate directory merge)
+  # "/." instead of "/*": copies dot files too, and does not fail on an empty directory
+  cp -f -a $platform_appdir/. $appdir
+else
+  echo "No 5_applications$QUNIBONE_PLATFORM_SUFFIX, only the platform independent 5_applications"
+fi
 
 # In any case: remove 5_applications_u and 5_applications_q
 rm -f -R  $HOME/10.03_app_demo/5_applications_u

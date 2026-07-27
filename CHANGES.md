@@ -2,6 +2,28 @@
 
 Notable changes to QUniBone, newest first.
 
+### The example applications are bus-specific: `5_applications_u`
+
+Every ready-made setup in `10.03_app_demo/5_applications` configures UNIBUS controllers (RL11, RK11,
+RF11, RX11, UDA50, M9312) and boots them on UNIBUS hardware; none of them runs on a QBone. The
+directory carried the plain, bus-independent name all the same, leaving nowhere to put the QBUS
+equivalents.
+
+- `10.03_app_demo/5_applications` → `10.03_app_demo/5_applications_u`, the usual `_u`/`_q` suffix
+  convention, with all content moved unchanged (scripts, `diskimages/`, `bootloaders/`,
+  `name_scheme.txt`, `.gitignore`). `5_applications_q` is to follow.
+- `qunibone-platform.sh` already merged `5_applications_u`/`_q` into a plain `5_applications` at
+  install time; it now creates that target directory instead of assuming the repository ships one,
+  copies with `src/.` rather than `src/*` (dot files included, no failure on an empty directory), and
+  says so when the platform has no example directory of its own yet — which is the state QBone is in
+  until `5_applications_q` exists.
+- `README.md` and `manual/README.md` name the split; all other `5_applications/...` paths in the
+  manual are unchanged, since they describe the installed system, where the merged directory keeps
+  that name.
+
+**Verified**: rename by `git mv` (no content diff), `qunibone-platform.sh` reviewed but not run —
+it only executes on an installed BeagleBone.
+
 ### The manual describes a disk subsystem on one page, not two
 
 Emulating a disk always takes at least two devices — the controller on the bus and the drive behind
