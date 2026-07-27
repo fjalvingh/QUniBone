@@ -26,8 +26,8 @@ These come from `device_c` (`10.01_base/2_src/arm/device.hpp`).
 | `verbosity` | `v` | unsigned | writable | Log level for this device alone: 1 = fatal, 2 = error, 3 = warning, 4 = info, 5 = debug. |
 
 `name` and `type` being read-only is the normal case; where a device makes `type` writable it is
-because setting it selects the emulated model (see [RL01/RL02](rl0102.md),
-[MSCP drives](mscp_drive.md), [UDA50](uda.md)).
+because setting it selects the emulated model (see [RL01/RL02](rl.md#the-rl01--rl02-drives),
+[MSCP drives](mscp.md#the-mscp-drives), [UDA50](mscp.md#the-uda50--rqdx3-controller)).
 
 ## Every device on the bus
 

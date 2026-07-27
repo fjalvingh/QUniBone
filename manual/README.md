@@ -332,20 +332,18 @@ Notes that hold for all devices:
 
 ### Disk and floppy subsystems
 
-| Device | Emulates | Default address |
-|---|---|---|
-| [RL11 / RLV11 / RLV12](rl11.md) | RL disk controller | `774400` |
-| [RL01 / RL02](rl0102.md) | Removable cartridge disk drive | — |
-| [RK11 / RKV11](rk11.md) | RK disk controller | `777400` |
-| [RK05](rk05.md) | Removable cartridge disk drive | — |
-| [RF11](rf11.md) | Fixed-head disk controller | `777460` |
-| [RS11](rs11.md) | Fixed-head disk platters | — |
-| [RX11 / RXV11](rx11.md) | Single-density floppy controller | `777170` |
-| [RX211 / RXV21](rx211.md) | Double-density floppy controller, with DMA | `777170` |
-| [RX01/RX02 µCPU](rx0102ucpu.md) | The microprocessor inside the floppy drive box | — |
-| [RX01 / RX02](rx0102drive.md) | 8" floppy drive | — |
-| [UDA50 / RQDX3](uda.md) | MSCP disk controller | `772150` |
-| [MSCP drives](mscp_drive.md) | RA/RD/RC/RX unit behind an MSCP controller | — |
+A disk or floppy is never one device: it takes a **controller** on the bus plus the **drives**
+behind it, and on the RX floppies a third object for the microprocessor in the drive box. Each page
+below covers one whole subsystem — every part of it, and a complete command script that puts them
+together.
+
+| Subsystem | Parts | Emulates | Default address |
+|---|---|---|---|
+| [RL disk](rl.md) | `rl` + `rl0` … `rl3` | RL11/RLV11/RLV12 controller with RL01/RL02 cartridge drives | `774400` |
+| [RK disk](rk.md) | `rk` + `rk0` … `rk7` | RK11/RKV11 controller with RK05 cartridge drives | `777400` |
+| [RF/RS fixed-head disk](rf.md) | `rf` + `rs0` | RF11 controller with the RS11 DECdisk | `777460` |
+| [RX floppy](rx.md) | `rx`/`ry` + `rxbox`/`rybox` + `rx0` `rx1`/`ry0` `ry1` | RX11/RXV11 (single density) and RX211/RXV21 (double density, DMA) with the drive box µCPU and its two 8" drives | `777170` |
+| [MSCP disk](mscp.md) | `uda` + `uda0` … `uda7` | UDA50/RQDX3 controller with RA/RD/RC/RX units | `772150` |
 
 ### Processors and processor options
 

@@ -2,6 +2,38 @@
 
 Notable changes to QUniBone, newest first.
 
+### The manual describes a disk subsystem on one page, not two
+
+Emulating a disk always takes at least two devices — the controller on the bus and the drive behind
+it, and on the RX floppies a third one for the microprocessor in the drive box. The manual gave each
+of those its own page, so "Disk and floppy subsystems" listed twelve entries for five subsystems and
+the reader had to assemble a working configuration from two or three pages that each showed only
+half a command sequence.
+
+- Twelve device pages became five subsystem pages, one per disk/floppy subsystem: `manual/rl.md`
+  (RL11/RLV11/RLV12 + RL01/RL02), `rk.md` (RK11/RKV11 + RK05), `rf.md` (RF11 + RS11), `rx.md`
+  (RX11/RXV11 and RX211/RXV21 + the drive box µCPU + RX01/RX02) and `mscp.md` (UDA50/RQDX3 + the
+  MSCP units). Each has a section per part — what the hardware is, its bus registers, its
+  parameters — preceded by a table of the parts and how they fit together. Nothing was dropped;
+  `rl11.md`, `rl0102.md`, `rk11.md`, `rk05.md`, `rf11.md`, `rs11.md`, `rx11.md`, `rx211.md`,
+  `rx0102ucpu.md`, `rx0102drive.md`, `uda.md` and `mscp_drive.md` are gone.
+- Every page ends with a **complete** command script — `#!` line, `d`, `pwr`, memory, bootloader,
+  controller, drive, image, waits and the address to start at — instead of the `en`/`sd`/`p`
+  fragment each half-page used to carry. They are the `5_applications` scripts, commented, so a
+  reader can run one as it stands. `rx.md` has two, one per subsystem.
+- Documented along the way, from `rx0102ucpu.cpp`: the RX drive box **forwards `enabled` to its two
+  drives**, so `en rxbox` enables `rx0`/`rx1` with it — the one disk subsystem where drives are not
+  enabled individually. The existing example scripts rely on this, the manual did not mention it.
+- The index table in `manual/README.md` now lists subsystems with their parts, and the inbound links
+  in `storage-drives.md`, `common-parameters.md` and `m9312.md` point into the merged pages by
+  section anchor.
+
+**Verified**: documentation only, no code changed. All 182 inter-page links and section anchors in
+`manual/` resolve. The example scripts are the `5_applications` ones with their comments expanded
+(`rl.md` reduced to a single drive, `rf.md` abridged where `unixv1.sh` deposits its 32-word
+bootstrap); they were not re-run on hardware. The `enabled` forwarding was read out of
+`RX0102uCPU_c::on_param_changed()`.
+
 ### One place to select UNIBUS or QBUS, for both build paths
 
 The target bus was configured twice: `QUNIBONE_PLATFORM` in `crosscompile.env` for `crossco`, and

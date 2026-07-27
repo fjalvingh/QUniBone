@@ -73,13 +73,15 @@ D>>> en rl0                # this unit
 ```
 
 Disabling the controller disables all of its drives, so `dis rl` unloads everything behind it. For
-drives that model the physical front of the machine — [RL01/RL02](rl0102.md),
-[RX01/RX02](rx0102drive.md) — `enabled` corresponds to the drive being connected at all, while the
-power switch, RUN/STOP button and cover are separate parameters of their own.
+drives that model the physical front of the machine — [RL01/RL02](rl.md#the-rl01--rl02-drives),
+[RX01/RX02](rx.md#the-rx01--rx02-drives) — `enabled` corresponds to the drive being connected at
+all, while the power switch, RUN/STOP button and cover are separate parameters of their own. On the
+RX floppies the power switch belongs to the [drive box](rx.md#the-drive-box-microcpu), which also
+enables and disables its two drives with itself.
 
 ## Related pages
 
 - [Common device parameters](common-parameters.md)
-- [RL01/RL02](rl0102.md), [RK05](rk05.md), [RS11](rs11.md), [RX01/RX02](rx0102drive.md),
-  [MSCP drives](mscp_drive.md)
+- The subsystem pages that describe each drive together with its controller:
+  [RL](rl.md), [RK](rk.md), [RF/RS](rf.md), [RX floppy](rx.md), [MSCP](mscp.md)
 - [Device index](README.md#device-index)
