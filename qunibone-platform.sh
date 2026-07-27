@@ -88,10 +88,15 @@ function link4dir() {
 # fix
 # GITHUB: contains both UniBone and QUniBone
 # 10.03_app_demo/5_applications are sorted into
-#       "...5_applications" (identical for UNIBUS and QBUS machines,
-#        may be absent - the examples are bus-specific)
+#       "...5_applications" (identical for UNIBUS and QBUS machines:
+#        the scripts, images and bootloader listings that are byte for byte
+#        the same on both - an image differing between the buses stays out,
+#        it carries the drivers of the machine it was built for)
 # and   "...5_applications_q" (runs only on QBUS)
 # and   "...5_applications_u" (runs only on UNIBUS)
+# A bus-specific script may name an image of the common tree and the other way
+# round; the two only meet after the copy below, which is what makes the
+# installed 5_applications complete.
 
 # Final Installation: only 5_applications with all fitting apps
 # if UniBone: copy 5_applications_u/* to 5_applications,
