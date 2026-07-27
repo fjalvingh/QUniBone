@@ -20,14 +20,14 @@ en uda0			# enable drive #0
 sd uda0			# select
 p type RD54
 # mount image
-p image vms073.r54  # full install by Mark, many packets
+p image ../diskimages/vms073.rd54.dsk  # full install by Mark, many packets
 p useimagesize	1
 
 # mount test disk in MSCP drive #1
 en uda1			# enable drive #1
 sd uda1			# select
 p type RA70
-p image test_du1.dsk      # mount image
+p image ../diskimages/test_du1.ra70.dsk      # mount image
 p useimagesize	1
 
 

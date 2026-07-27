@@ -13,7 +13,7 @@ pwr			# reboot PDP-11
 m i			# install max QBUS memory
 
 # Deposit bootloader into memory
-m ll du.lst
+m ll ../bootloaders/du.lst
 
 en uda			# enable UDA50 controller
 
@@ -22,7 +22,7 @@ en uda0			# enable drive #0
 sd uda0			# select drive #0
 
 p type RD54
-p image root.rd54       # mount image file with test pattern
+p image ../diskimages/root.rd54.dsk       # mount image file with test pattern
 
 .print MSCP drives ready.
 .print UDA50 boot loader installed.

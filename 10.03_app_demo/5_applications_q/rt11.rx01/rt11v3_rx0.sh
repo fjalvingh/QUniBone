@@ -14,7 +14,7 @@ pwr
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll dx.lst
+m ll ../bootloaders/dx.lst
 
 en rx			# enable RX11 controller
 en rxbox
@@ -23,10 +23,10 @@ sd rxbox
 p pwr 1			# power-on drive box
 
 sd rx0
-p img rt11v03-1.img 	# insert floppy into drive #0
+p img ../diskimages/rt11v03-1.rx01.dsk 	# insert floppy into drive #0
 
 sd rx1
-p img rt11v03-2.img  	# insert floppy into drive #1
+p img ../diskimages/rt11v03-2.rx01.dsk  	# insert floppy into drive #1
 # p emulation_speed 10	# 10x speed. Load disk in 5 seconds
 
 .print Disk drive now on track after 5 secs

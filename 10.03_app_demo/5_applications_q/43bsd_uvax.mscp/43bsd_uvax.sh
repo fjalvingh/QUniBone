@@ -16,7 +16,7 @@ en uda			# enable UDA50 controller
 en uda0			# enable drive #0
 sd uda0			# select
 p type RA82
-p image quas.dsk
+p image ../diskimages/quas.ra82.dsk
 p useimagesize	1
 
 

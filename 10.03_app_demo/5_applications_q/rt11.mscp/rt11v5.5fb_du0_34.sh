@@ -10,7 +10,7 @@ pwr			# reboot PDP-11
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll du.lst
+m ll ../bootloaders/du.lst
 
 en uda			# enable UDA50 controller
 
@@ -19,13 +19,13 @@ en uda0			# enable drive #0
 sd uda0			# select
 # set type to "RA80"
 p type RA80
-p image rt11v5.5_34.ra80 # mount image file with test pattern
+p image ../diskimages/rt11v5.5_34.ra80.dsk # mount image file with test pattern
 
 # empty scratch disk in uda1:
 en uda1			# enable drive #1
 sd uda1			# select
 p type RA80
-p image scratch1.ra80
+p image ../diskimages/scratch1.ra80.dsk
 
 
 

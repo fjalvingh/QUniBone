@@ -10,17 +10,17 @@ pwr			# reboot PDP-11
 m i			# install max  memory
 
 # Deposit bootloader into memory
-m ll dk.lst
+m ll ../bootloaders/dk.lst
 
 en rk			# enable RK11 controller
 
 en rk0			# enable drive #0
 sd rk0			# select
-p image RTRKV4.00 # www.classiccmp.org/PDP-11/RT-11/dists
+p image ../diskimages/RTRKV4.00.rk05.dsk # www.classiccmp.org/PDP-11/RT-11/dists
 
 en rk1			# enable drive #1
 sd rk1			# select
-p image scratch1.rk
+p image ../diskimages/scratch1.rk05.dsk
 
 
 .print Disk drive now on track after 3 secs

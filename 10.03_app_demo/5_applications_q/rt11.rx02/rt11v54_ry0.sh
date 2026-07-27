@@ -14,7 +14,7 @@ pwr
 m i			# install max UNIBUS memory
 
 # Deposit bootloader into memory
-m ll dy.lst
+m ll ../bootloaders/dy.lst
 
 en ry			# enable RX11 controller
 en rybox
@@ -24,7 +24,7 @@ p pwr 1			# power-on drive box
 
 sd ry0
 p it0 1 # track 0 in image
-p img RT11.RX2 	# insert floppy into drive #0
+p img ../diskimages/RT11.rx02.dsk 	# insert floppy into drive #0
 
 #sd ry1
 #p it0 1 # track 0 in image
