@@ -101,3 +101,10 @@ The source is edited in VS Code with the C/C++ extension. Its code completion an
 definition" need a `compile_commands.json` at the repo root, which `crossco` generates for you with
 [`bear`](https://github.com/rizsotto/Bear) (`sudo apt install bear`): automatically on the first
 build, and on demand with `./crossco -c` after adding or removing source files.
+
+### Building a distribution base image
+
+`./prepare-base-image` turns a raw `dd` capture of a working UniBone/QBone card into a small,
+generic base image: the software tree removed, machine identity scrubbed, shrunk to just above what
+it uses, and growing itself back to the whole card on the first boot. See
+[COMPILING.md](COMPILING.md).

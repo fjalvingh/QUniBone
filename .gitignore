@@ -15,5 +15,6 @@ qunibone-platform.env
 *.swp
 91_3rd_party/**
 .settings
+/imgbuild/
 
 

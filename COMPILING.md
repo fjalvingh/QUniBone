@@ -127,3 +127,49 @@ runs that chain as a `preLaunchTask` before attaching:
 The background task's `endsPattern` matches gdbserver's own `Listening on port` line, so VS Code
 knows the remote debugger is ready before it attaches. With this in place, hitting F5 rebuilds,
 redeploys, starts `gdbserver` on the BBB, and attaches — one step instead of four.
+
+## Building a distribution base image
+
+A UniBone/QBone distribution starts from a raw `dd` capture of a working BeagleBone SD card, because
+that card is the only place some of the setup exists: the Debian armhf userland, the PRU toolchain
+in `91_3rd_party/` (gitignored), and the `files.retrocmp.com` apt mirror config in
+`02_bbb_config/03_debian-8.10.0-armhf/`, which is in no checkout at all. The capture itself is not
+distributable — it is the size of the whole card, and it carries one machine's identity plus one
+day's build of the software tree.
+
+`prepare-base-image` reduces such a capture to the part worth distributing:
+
+```bash
+sudo ./prepare-base-image ~/Downloads/sdcard_qbone_2025_06_09.dd
+sudo ./prepare-base-image -f <image>      # overwrite an existing imgbuild/<stem>-clean.img
+sudo ./prepare-base-image -y <image>      # do not ask for confirmation
+sudo ./prepare-base-image -k <image>      # keep /var/lib/apt/lists (default: emptied)
+sudo ./prepare-base-image -s 500 <image>  # free space in MiB above the filesystem minimum (default 300)
+```
+
+The result is `imgbuild/<stem>-clean.img`, where `<stem>` is the capture's name without a trailing
+`.dd`/`.img`/`.raw`. `imgbuild/` is gitignored, and the finished image is chowned back to the user
+who invoked `sudo`. The input file is never modified. Root is required for `losetup`/`mount`/
+`e2fsck`; the script says so rather than re-invoking itself under `sudo`. During the run it needs
+free space for a copy of everything up to the end of the partition — about 15 GB for a 16 GB card.
+
+It removes the QUniBone tree from `/root` (a separate script installs a freshly built one), scrubs
+machine-specific state, shrinks the filesystem and the partition, and zeroes the free space so the
+image compresses to roughly its content. What it deliberately **keeps** is everything that cannot be
+rebuilt from this repository: `91_3rd_party/`, `02_bbb_config/03_debian-8.10.0-armhf/`,
+`cape.eeprom` and root's own dotfiles.
+
+The image grows itself back to the whole card on the first boot, via
+`qunibone-firstboot-grow.service` (installed from `02_bbb_config/04_base_image/`). That happens in
+two stages, which is why the board reboots once: the BeagleBone's own `grow_partition.sh` only
+rewrites the partition table, and `generic-startup.sh` runs `resize2fs` on the boot after that.
+`/var/lib/qunibone-grown` is what stops it from repeating — without that marker the board would
+reboot forever.
+
+Two properties of the input are checked and refused rather than worked around. The capture must have
+a single DOS partition of type 83, bootable, holding ext4 — and it must start at sector 8192, because
+`grow_partition.sh` recreates the partition at 4 MiB on the first boot, so a capture starting
+anywhere else would have its partition moved and its filesystem destroyed. Note also that the first
+boot rewrites the whole partition label and assigns a new random disk identifier; that is harmless
+for these images (root comes from the kernel command line as a device name), but a card booting via
+`root=PARTUUID=` would not survive it.

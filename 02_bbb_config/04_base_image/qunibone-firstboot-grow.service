@@ -1,0 +1,16 @@
+[Unit]
+Description=First boot: grow the root partition to the whole SD card
+# generic-board-startup.service does the resize2fs half of the job (it acts on
+# the /resizerootfs file this service's script leaves behind), and regenerates
+# the ssh host keys grow_partition.sh waits for.
+After=generic-board-startup.service ssh.service
+# Skip once the card has been grown. The script writes the marker; this makes
+# the unit cheap to leave enabled if "systemctl disable" ever does not stick.
+ConditionPathExists=!/var/lib/qunibone-grown
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qunibone-firstboot-grow.sh
+
+[Install]
+WantedBy=multi-user.target

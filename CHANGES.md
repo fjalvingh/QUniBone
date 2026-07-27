@@ -2,6 +2,58 @@
 
 Notable changes to QUniBone, newest first.
 
+### A card capture can be turned into a distribution base image
+
+A distribution starts from a raw `dd` capture of a working BeagleBone card, because that card is the
+only place parts of the setup exist: the Debian armhf userland, the PRU toolchain of `91_3rd_party`
+(gitignored) and the apt mirror config in `02_bbb_config/03_debian-8.10.0-armhf`, which is in no
+checkout at all. But a capture cannot be handed out: it is the size of the whole card, it carries
+one machine's identity, and the software tree in it is whatever was built that day. Turning one into
+a base image was an undocumented manual procedure; now it is a script, and the base is small enough
+that installing a freshly built tree onto it is a separate, cheap step.
+
+- `prepare-base-image` (repo root, needs root) takes a capture and writes
+  `imgbuild/<stem>-clean.img`, gitignored and chowned back to the invoking user. The input is never
+  modified. Flags `-f` (overwrite), `-y` (no confirmation), `-k` (keep `/var/lib/apt/lists`),
+  `-s <MiB>` (free space above the filesystem minimum, default 300). Documented in `COMPILING.md`.
+- It removes the QUniBone tree from `/root` — the numbered directories, `02_bbb_config/01_cape`, the
+  repository's own scripts and settings next to them, and the `~/*.sh` links into
+  `10.03_app_demo/5_applications`. It keeps what this repository cannot rebuild: `91_3rd_party`,
+  `02_bbb_config/03_debian-8.10.0-armhf`, `cape.eeprom` and root's dotfiles. The delete lists are
+  bare names run through a helper that rejects anything with a slash, so no edit of them can
+  degenerate into removing `/root` itself.
+- It scrubs what a capture would otherwise ship: the ssh host keys (`/etc/ssh/ssh.regenerate` makes
+  the board regenerate them, and its own startup script resets the machine-id with them), the
+  MAC-bound `70-persistent-net.rules` (on another board the interface would come up as `eth1` and
+  the image would have no network), the connman profiles including WiFi passphrases, dhcp leases,
+  the systemd random seed, `resolv.conf`, shell and editor histories, the subversion auth cache, the
+  apt cache and the logs.
+- It shrinks the filesystem and the partition and zeroes the remaining free space. Note that
+  `resize2fs`' own minimum runs far above actual usage — 502270 blocks against 389356 in use on the
+  sample capture — and the margin is on top of that; recovering the difference would mean copying
+  into a fresh filesystem, which this script does not do.
+- The partition entry keeps its start, type and boot flag, and the boot area holding MLO and u-boot
+  is hashed before and after and required to be identical, so a future `sfdisk` that decides to
+  normalise the MBR cannot silently break booting. A capture whose partition does not start at
+  sector 8192 is refused: the board's `grow_partition.sh` recreates it at 4 MiB, which would move
+  the partition and destroy the filesystem.
+- `02_bbb_config/04_base_image/qunibone-firstboot-grow.{sh,service}` grow the card back on the first
+  boot and reboot once, guarded by `/var/lib/qunibone-grown` — without that marker the two-stage
+  BeagleBone grow mechanism would reboot forever. Named for the project, not one bus, since the same
+  script prepares UniBone and QBone captures, and installed to `/usr/local/sbin` rather than into
+  `/opt/scripts`, which belongs to the BeagleBone's own updatable tree.
+
+**Verified**: on synthetic captures built for the purpose, checking that the keep list survives, the
+delete list and all example links are gone, the machine identity is scrubbed, the log tree keeps its
+directories, and the unit's `multi-user.target.wants` link is relative so no host path is baked into
+the image; eleven refusal cases (GPT label, two partitions, a vfat partition, start sector 2048, a
+truncated file, an existing output, argument errors, non-root) each fail with their own message and
+leave no loop device attached and nothing mounted. On the real 29850 MiB QBone capture: 2266 MiB
+out, 592 MiB of tree removed, 25 entries and 22 links, `e2fsck -fn` clean. The first boot was
+replayed on an 8 GB fake card by running exactly what the board runs — `sfdisk 4M,,L,*` then
+`resize2fs` — which grew the filesystem from 579072 to 2096128 blocks with all 64610 files intact.
+No image was booted on real hardware.
+
 ### One common tree for the examples both buses run
 
 With a QBUS example set beside the UNIBUS one, most of it was the same file twice: 45 disk images,

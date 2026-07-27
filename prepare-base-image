@@ -1,0 +1,646 @@
+#!/bin/bash
+#
+# Turn a raw "dd" capture of a working UniBone/QBone SD card into the base for
+# a distribution image.
+#
+# A capture of a running card is the only place some of the setup exists: the
+# Debian armhf userland, the PRU toolchain in 91_3rd_party (gitignored), the
+# apt mirror config in 02_bbb_config/03_debian-8.10.0-armhf (not in this
+# repository at all). But the capture itself cannot be distributed: it is the
+# size of the whole card, it carries one machine's identity (ssh host keys,
+# MAC-bound network config, shell history, WiFi credentials) and one day's
+# build of the QUniBone tree.
+#
+# This script strips it down to the part worth distributing:
+#   - everything behind the single partition is dropped
+#   - the QUniBone tree is removed from /root (a separate script installs a
+#     freshly built one), while the parts that cannot be rebuilt from this
+#     repository are kept
+#   - machine-specific state is scrubbed
+#   - the filesystem and the partition are shrunk to just above what is used,
+#     and the free space is zeroed so the result compresses well
+#   - the image grows itself back to the whole card on the first boot
+#
+# The input file is never modified; the result is written to imgbuild/.
+#
+# Needs root for losetup/mount/e2fsck.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+# Payload installed into the image, see 02_bbb_config/04_base_image/
+PAYLOAD_DIR="$SCRIPT_DIR/02_bbb_config/04_base_image"
+GROW_SCRIPT_NAME=qunibone-firstboot-grow.sh
+GROW_UNIT_NAME=qunibone-firstboot-grow.service
+GROW_MARKER=/var/lib/qunibone-grown
+
+# The BeagleBone's own grow_partition.sh recreates partition 1 starting at 4 MiB,
+# so a capture whose partition starts anywhere else would have it moved - and its
+# filesystem destroyed - on the first boot.
+REQUIRED_START_SECTOR=8192
+
+FORCE=0
+ASSUME_YES=0
+KEEP_APT_LISTS=0
+SLACK_MIB=300
+SRC=""
+# kept for the "run it with sudo" hint, the parse loop below consumes "$@"
+ORIG_ARGS="$*"
+
+usage() {
+  echo "Usage: $0 [-f] [-y] [-k] [-s <MiB>] <raw-image>" >&2
+  echo "  <raw-image>  raw 'dd' capture of a UniBone/QBone SD card" >&2
+  echo "  -f           overwrite an existing output image" >&2
+  echo "  -y           do not ask for confirmation" >&2
+  echo "  -k           keep /var/lib/apt/lists (default: emptied)" >&2
+  echo "  -s <MiB>     free space above the filesystem minimum (default $SLACK_MIB)" >&2
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f) FORCE=1 ;;
+    -y) ASSUME_YES=1 ;;
+    -k) KEEP_APT_LISTS=1 ;;
+    -s)
+      shift
+      SLACK_MIB="$1"
+      case "$SLACK_MIB" in
+        ''|*[!0-9]*) echo "Error: -s needs a number of MiB, got '$1'." >&2 ; exit 1 ;;
+      esac
+      ;;
+    -*) usage ; exit 1 ;;
+    *)
+      if [ -n "$SRC" ]; then
+        echo "Error: more than one input image given ('$SRC' and '$1')." >&2
+        usage
+        exit 1
+      fi
+      SRC="$1"
+      ;;
+  esac
+  shift
+done
+
+if [ -z "$SRC" ]; then
+  usage
+  exit 1
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Error: $0 needs root for losetup/mount/e2fsck." >&2
+  echo "Run: sudo $0 $ORIG_ARGS" >&2
+  exit 1
+fi
+
+for f in "$PAYLOAD_DIR/$GROW_SCRIPT_NAME" "$PAYLOAD_DIR/$GROW_UNIT_NAME" ; do
+  if [ ! -f "$f" ]; then
+    echo "Error: missing payload file $f." >&2
+    echo "It is part of this repository and is installed into the image." >&2
+    exit 1
+  fi
+done
+
+#################################################################
+# Input, output paths
+
+if [ ! -f "$SRC" ]; then
+  echo "Error: $SRC is not a file." >&2
+  exit 1
+fi
+
+STEM="$(basename "$SRC")"
+case "$STEM" in
+  *.dd)  STEM="${STEM%.dd}"  ;;
+  *.img) STEM="${STEM%.img}" ;;
+  *.raw) STEM="${STEM%.raw}" ;;
+esac
+
+OUTDIR="$SCRIPT_DIR/imgbuild"
+OUT="$OUTDIR/$STEM-clean.img"
+# Built under a different name and renamed on success, so a failed or aborted
+# run never leaves a file that looks finished.
+TMPOUT="$OUT.partial"
+
+if [ "$(readlink -f "$SRC")" = "$(readlink -f "$OUT")" ]; then
+  echo "Error: $SRC is the output file itself; the input is never modified." >&2
+  exit 1
+fi
+
+if [ -e "$OUT" ] && [ "$FORCE" -eq 0 ]; then
+  echo "Error: $OUT already exists. Pass -f to overwrite it." >&2
+  exit 1
+fi
+
+#################################################################
+# Probe the source: partition table and filesystem
+#
+# sfdisk -d is the documented interchange format: line oriented, stable, and
+# needs no json parser.
+
+TABLE="$(sfdisk -d "$SRC" 2>/dev/null)"
+if [ $? -ne 0 ] || [ -z "$TABLE" ]; then
+  echo "Error: $SRC has no readable partition table." >&2
+  exit 1
+fi
+
+LABEL="$(echo "$TABLE" | sed -n 's/^label: *//p')"
+if [ "$LABEL" != "dos" ]; then
+  echo "Error: $SRC has a '$LABEL' partition table; only DOS/MBR captures are supported." >&2
+  exit 1
+fi
+
+PARTLINES="$(echo "$TABLE" | grep -c 'start=')"
+if [ "$PARTLINES" -ne 1 ]; then
+  echo "Error: $SRC has $PARTLINES partitions; only a single-partition BeagleBone card is supported." >&2
+  exit 1
+fi
+PARTLINE="$(echo "$TABLE" | grep 'start=')"
+
+START="$(echo "$PARTLINE" | sed -n 's/.*start= *\([0-9]*\).*/\1/p')"
+SIZE="$(echo "$PARTLINE" | sed -n 's/.*size= *\([0-9]*\).*/\1/p')"
+PTYPE="$(echo "$PARTLINE" | sed -n 's/.*type= *\([0-9a-fA-F]*\).*/\1/p')"
+case "$START$SIZE" in
+  ''|*[!0-9]*) echo "Error: cannot read start/size from the partition table of $SRC." >&2 ; exit 1 ;;
+esac
+
+if [ "$PTYPE" != "83" ]; then
+  echo "Error: partition 1 of $SRC has type $PTYPE, expected 83 (Linux)." >&2
+  exit 1
+fi
+if ! echo "$PARTLINE" | grep -q 'bootable'; then
+  echo "Error: partition 1 of $SRC is not marked bootable." >&2
+  exit 1
+fi
+if [ "$START" -ne "$REQUIRED_START_SECTOR" ]; then
+  echo "Error: partition 1 of $SRC starts at sector $START, expected $REQUIRED_START_SECTOR." >&2
+  echo "The BeagleBone's own grow_partition.sh recreates the partition at 4 MiB on the first" >&2
+  echo "boot, which would move this partition and destroy its filesystem." >&2
+  exit 1
+fi
+
+FSTYPE="$(blkid -p -O $((START * 512)) -s TYPE -o value "$SRC" 2>/dev/null)"
+if [ "$FSTYPE" != "ext4" ]; then
+  echo "Error: partition 1 of $SRC holds '$FSTYPE', expected ext4." >&2
+  exit 1
+fi
+
+SRCBYTES="$(stat -c%s "$SRC")"
+IMGBYTES=$(( (START + SIZE) * 512 ))
+if [ "$IMGBYTES" -gt "$SRCBYTES" ]; then
+  echo "Error: $SRC is truncated: the partition ends at $IMGBYTES bytes, the file is $SRCBYTES." >&2
+  exit 1
+fi
+
+mkdir -p "$OUTDIR" || exit 1
+AVAIL="$(df -P -B1 "$OUTDIR" | awk 'NR==2 {print $4}')"
+if [ -n "$AVAIL" ] && [ "$AVAIL" -lt "$IMGBYTES" ]; then
+  echo "Error: $OUTDIR has $((AVAIL / 1024 / 1024)) MiB free, the working copy needs $((IMGBYTES / 1024 / 1024)) MiB." >&2
+  exit 1
+fi
+
+#################################################################
+# What will be removed from the image
+#
+# The QUniBone tree is installed directly into root's home directory, so these
+# are entries of /root. A separate script installs a freshly built tree.
+
+DELETE_DIRS="01.01_pcb 01.02_panel 10.01_base 10.02_devices 10.03_app_demo
+             10.04_device_exerciser 10.05_cputest 90_common"
+
+DELETE_FILES="compile.sh cleanup.sh demo.sh github-sync.sh qunibone-platform.sh
+              update-code.sh update-files.sh autostart.sh autostart.sh.example
+              profile.example qunibone-platform.env qunibone-platform.env.example
+              compile-bbb.env compile-x64.env copyright_header.c LICENSE
+              README.md CHANGES.md COMPILING.md IMPROVEMENTS.md CLAUDE.md
+              crossco deploy-bbb debug-bbb master.tar.gz"
+
+# 02_bbb_config is not removed as a whole: 03_debian-8.10.0-armhf (the apt
+# mirror config) exists only on a card, nowhere in this repository.
+DELETE_SUBDIRS="02_bbb_config/01_cape"
+
+echo "Preparing a distribution base image."
+echo
+echo "  Source        $SRC ($((SRCBYTES / 1024 / 1024)) MiB)"
+echo "  Partition 1   start $START, $SIZE sectors, type 83, bootable, ext4"
+echo "  Output        $OUT"
+echo
+echo "It removes the QUniBone software tree from /root of the image:"
+echo "  $(echo $DELETE_DIRS) $DELETE_SUBDIRS"
+echo "  and the scripts, examples and settings of the repository next to it,"
+echo "  plus the ~/*.sh links into 10.03_app_demo/5_applications."
+echo "It keeps 91_3rd_party (PRU toolchain), 02_bbb_config/03_debian-8.10.0-armhf"
+echo "  (apt mirror config), cape.eeprom and root's own dotfiles: none of those"
+echo "  can be rebuilt from this repository."
+echo "It scrubs machine identity: ssh host keys, network and connman config,"
+echo "  dhcp leases, random seed, logs, shell histories, apt cache."
+echo "It shrinks the filesystem to its minimum plus $SLACK_MIB MiB and zeroes the"
+echo "  remaining free space, and installs $GROW_UNIT_NAME,"
+echo "  which grows the card back on the first boot and reboots once."
+echo
+echo "$SRC itself is not modified."
+if [ "$ASSUME_YES" -eq 0 ]; then
+  read -p "Are you sure [y/*] ? "
+  if [[ ! $REPLY =~ ^[Yy]$ ]] ; then
+    echo "OK, abort."
+    exit 1
+  fi
+fi
+
+#################################################################
+# Cleanup: never leave a loop device attached or a filesystem mounted
+
+MNT=""
+LOOPDEV=""
+
+function cleanup() {
+  if [ -n "$MNT" ] && mountpoint -q "$MNT" ; then
+    sync
+    umount "$MNT" 2>/dev/null || { sleep 1 ; umount -l "$MNT" 2>/dev/null ; }
+  fi
+  [ -n "$MNT" ] && [ -d "$MNT" ] && rmdir "$MNT" 2>/dev/null
+  if [ -n "$LOOPDEV" ] && losetup "$LOOPDEV" >/dev/null 2>&1 ; then
+    losetup -d "$LOOPDEV" 2>/dev/null
+  fi
+  # backstop: anything else still bound to the working copy
+  for l in $(losetup -j "$TMPOUT" -O NAME -n 2>/dev/null) ; do
+    losetup -d "$l" 2>/dev/null
+  done
+}
+trap cleanup EXIT INT TERM
+
+#################################################################
+# Helpers
+
+# e2fsck signals "errors corrected" with exit code 1 and "corrected, reboot
+# advised" with 2. Both are success here - a capture of a card pulled from a
+# running system regularly needs its journal recovered. Only 4 and above mean
+# the filesystem is broken.
+function run_e2fsck() {
+  local dev="$1"
+  local what="$2"
+  local rc
+  echo "Checking the filesystem ($what) ..."
+  e2fsck -f -y "$dev"
+  rc=$?
+  if [ $rc -ge 4 ] ; then
+    echo "Error: e2fsck ($what) could not repair the filesystem in $TMPOUT (exit $rc)." >&2
+    echo "The capture is damaged, re-read the card." >&2
+    exit 1
+  fi
+  return 0
+}
+
+# Absolute path of something inside the mounted image. Refuses anything that
+# could escape, and re-checks that the image is actually mounted, so a bug can
+# never turn a removal loose on the host's own filesystem.
+function img_path() {
+  case "$1" in
+    /) echo "Error: internal, refusing to operate on the image root." >&2 ; exit 1 ;;
+    /*) ;;
+    *) echo "Error: internal, image path '$1' is not absolute." >&2 ; exit 1 ;;
+  esac
+  if ! mountpoint -q "$MNT" ; then
+    echo "Error: internal, the image is not mounted at $MNT." >&2
+    exit 1
+  fi
+  printf '%s' "$MNT$1"
+}
+
+# Same, for a single entry of /root: a bare name, never a path. This is what
+# makes "rm -rf /root" unreachable however the delete lists are edited.
+function root_entry() {
+  case "$1" in
+    ""|.|..|*/*) echo "Error: internal, bad /root entry '$1'." >&2 ; exit 1 ;;
+  esac
+  img_path "/root/$1"
+}
+
+REMOVED=0
+MISSING=""
+
+function remove_root_entry() {
+  local p
+  p="$(root_entry "$1")" || exit 1
+  if [ -e "$p" ] || [ -L "$p" ] ; then
+    rm -rf "$p" || exit 1
+    REMOVED=$((REMOVED + 1))
+  else
+    MISSING="$MISSING $1"
+  fi
+}
+
+# Anything below /root, for the few entries that are not top level.
+function remove_root_path() {
+  local p
+  p="$(img_path "/root/$1")" || exit 1
+  if [ -e "$p" ] || [ -L "$p" ] ; then
+    rm -rf "$p" || exit 1
+    REMOVED=$((REMOVED + 1))
+  else
+    MISSING="$MISSING $1"
+  fi
+}
+
+function scrub() {
+  local p
+  p="$(img_path "$1")" || exit 1
+  rm -rf $p
+}
+
+# sha256 of the boot area (sector 0 up to the partition), with the 64 byte
+# partition table blanked out. Everything else there - the MBR boot code, the
+# MLO/SPL at 0x20000 and the u-boot image at 0x60000 - must survive byte for
+# byte, and this is what proves it per run instead of once by hand.
+function raw_digest() {
+  {
+    dd if="$1" bs=1 count=446 status=none
+    head -c 64 /dev/zero
+    dd if="$1" bs=1 skip=510 count=2 status=none
+    dd if="$1" bs=512 skip=1 count=$((START - 1)) status=none
+  } | sha256sum | cut -d' ' -f1
+}
+
+#################################################################
+# Copy everything up to the end of the partition
+
+echo
+echo "Copying $((IMGBYTES / 1024 / 1024)) MiB (boot area and partition 1) to $TMPOUT ..."
+rm -f "$TMPOUT"
+dd if="$SRC" of="$TMPOUT" bs=4M iflag=fullblock,count_bytes count=$IMGBYTES \
+   status=progress || exit 1
+sync
+
+# Map only the filesystem, not the whole image: there is no partition device to
+# race udev over, and it is then impossible to write through the loop device
+# into the partition table or the u-boot area.
+LOOPDEV="$(losetup --find --show --offset $((START * 512)) --sizelimit $((SIZE * 512)) "$TMPOUT")" || exit 1
+
+run_e2fsck "$LOOPDEV" "as captured"
+
+#################################################################
+# Mount and strip
+
+MNT="$(mktemp -d /tmp/prepare-base-image.XXXXXX)" || exit 1
+mount -t ext4 -o rw,noatime,nodev,nosuid "$LOOPDEV" "$MNT" || exit 1
+
+if ! mountpoint -q "$MNT" ; then
+  echo "Error: internal, $MNT is not a mount point after mounting." >&2
+  exit 1
+fi
+if [ "$(findmnt -no SOURCE "$MNT")" != "$LOOPDEV" ]; then
+  echo "Error: internal, $MNT is not $LOOPDEV." >&2
+  exit 1
+fi
+for f in /etc/debian_version /opt/scripts/boot/generic-startup.sh /root ; do
+  if [ ! -e "$MNT$f" ]; then
+    echo "Error: $SRC does not look like a BeagleBone card: $f is missing." >&2
+    exit 1
+  fi
+done
+
+USED_BEFORE="$(df -P -k "$MNT" | awk 'NR==2 {print $3}')"
+
+echo
+echo "Removing the QUniBone tree from /root ..."
+for d in $DELETE_DIRS ; do
+  remove_root_entry "$d"
+done
+for f in $DELETE_FILES ; do
+  remove_root_entry "$f"
+done
+for d in $DELETE_SUBDIRS ; do
+  remove_root_path "$d"
+done
+
+# The example scripts are linked into /root by qunibone-platform.sh, with
+# absolute targets like /root/10.03_app_demo/5_applications/memory/zkma.sh.
+# Match them on the link text: inside a mounted image an absolute target is
+# resolved against the HOST's root, so -xtype l would keep every one of them on
+# a machine that happens to have its own /root/10.03_app_demo.
+SYMLINKS=0
+for d in $DELETE_DIRS ; do
+  n="$(find "$MNT/root" -maxdepth 1 -type l -lname "/root/$d/*" -print -delete | wc -l)"
+  SYMLINKS=$((SYMLINKS + n))
+done
+
+# Report - never delete - anything else in /root left pointing nowhere.
+for l in "$MNT"/root/* ; do
+  [ -L "$l" ] || continue
+  t="$(readlink "$l")"
+  case "$t" in
+    /*) [ -e "$MNT$t" ] || echo "  Note: $(basename "$l") still links to $t, which the image does not have." ;;
+  esac
+done
+
+#################################################################
+# Scrub machine identity
+
+echo "Scrubbing machine-specific state ..."
+
+# The board's own generic-startup.sh acts on this marker: it regenerates all ssh
+# host keys mixing in the hardware RNG, and resets /etc/machine-id and the dbus
+# machine id with it. The private keys still have to go from the image itself.
+touch "$(img_path /etc/ssh/ssh.regenerate)" || exit 1
+scrub '/etc/ssh/ssh_host_*'
+
+# MAC address bound to eth0. On another board the interface would come up as
+# eth1 and the image would have no network at all.
+scrub /etc/udev/rules.d/70-persistent-net.rules
+# per-MAC profiles, including WiFi passphrases
+scrub '/var/lib/connman/*'
+scrub '/var/lib/dhcp/*'
+scrub /var/lib/systemd/random-seed
+scrub /etc/resolv.conf
+
+scrub /root/.ssh/known_hosts
+scrub /root/.bash_history
+scrub /root/.nano_history
+scrub /root/.subversion/auth
+scrub '/root/.cache/*'
+scrub /home/debian/.bash_history
+scrub '/tmp/*'
+scrub '/var/tmp/systemd-private-*'
+scrub '/var/cache/apt/archives/*.deb'
+if [ "$KEEP_APT_LISTS" -eq 0 ]; then
+  scrub '/var/lib/apt/lists/*'
+fi
+
+# A marker left from a card that was itself grown would silently disable the
+# first boot grow forever.
+scrub /var/lib/qbone-grown
+scrub "$GROW_MARKER"
+scrub /resizerootfs
+
+find "$MNT" -xdev -name 'qunibone.log.csv' -delete
+
+# Logs: keep the directory tree (apt/, fsck/, ... are expected to exist), drop
+# the files, recreate the three the login machinery wants to find.
+find "$MNT/var/log" -mindepth 1 ! -type d -delete
+UTMP_GID="$(awk -F: '$1 == "utmp" { print $3 }' "$MNT/etc/group")"
+[ -n "$UTMP_GID" ] || UTMP_GID=0
+: > "$MNT/var/log/wtmp"    ; chown 0:"$UTMP_GID" "$MNT/var/log/wtmp"    ; chmod 664 "$MNT/var/log/wtmp"
+: > "$MNT/var/log/btmp"    ; chown 0:"$UTMP_GID" "$MNT/var/log/btmp"    ; chmod 660 "$MNT/var/log/btmp"
+: > "$MNT/var/log/lastlog" ; chown 0:"$UTMP_GID" "$MNT/var/log/lastlog" ; chmod 664 "$MNT/var/log/lastlog"
+
+#################################################################
+# Install the first boot grow
+
+echo "Installing $GROW_UNIT_NAME ..."
+
+# An earlier, bus-specific version of the same mechanism.
+scrub '/opt/scripts/tools/qbone-firstboot-grow.sh'
+scrub '/etc/systemd/system/qbone-firstboot-grow.service'
+scrub '/etc/systemd/system/multi-user.target.wants/qbone-firstboot-grow.service'
+
+install -D -m 755 "$PAYLOAD_DIR/$GROW_SCRIPT_NAME" \
+        "$(img_path "/usr/local/sbin/$GROW_SCRIPT_NAME")" || exit 1
+install -D -m 644 "$PAYLOAD_DIR/$GROW_UNIT_NAME" \
+        "$(img_path "/etc/systemd/system/$GROW_UNIT_NAME")" || exit 1
+mkdir -p "$(img_path /etc/systemd/system/multi-user.target.wants)" || exit 1
+# What "systemctl enable" would create. Relative on purpose: an absolute link
+# built from $MNT would bake this host's temporary mount path into the image.
+ln -sfn "../$GROW_UNIT_NAME" \
+        "$(img_path "/etc/systemd/system/multi-user.target.wants/$GROW_UNIT_NAME")" || exit 1
+
+sync
+USED_AFTER="$(df -P -k "$MNT" | awk 'NR==2 {print $3}')"
+FREED_MIB=$(( (USED_BEFORE - USED_AFTER) / 1024 ))
+
+umount "$MNT" || exit 1
+rmdir "$MNT" ; MNT=""
+
+#################################################################
+# Shrink
+
+run_e2fsck "$LOOPDEV" "before resize"
+
+MIN="$(resize2fs -P "$LOOPDEV" 2>/dev/null | awk '{print $NF}')"
+case "$MIN" in
+  ''|*[!0-9]*) echo "Error: could not read the minimum size from resize2fs." >&2 ; exit 1 ;;
+esac
+BLKSZ="$(dumpe2fs -h "$LOOPDEV" 2>/dev/null | awk '/^Block size:/ {print $3}')"
+CUR="$(dumpe2fs -h "$LOOPDEV" 2>/dev/null | awk '/^Block count:/ {print $3}')"
+case "$BLKSZ$CUR" in
+  ''|*[!0-9]*) echo "Error: could not read the block size/count from dumpe2fs." >&2 ; exit 1 ;;
+esac
+SPB=$((BLKSZ / 512))
+ALIGN=$((1024 * 1024 / BLKSZ))
+TARGET=$(( MIN + SLACK_MIB * 1024 * 1024 / BLKSZ ))
+TARGET=$(( (TARGET + ALIGN - 1) / ALIGN * ALIGN ))
+
+echo
+if [ "$TARGET" -ge "$CUR" ]; then
+  echo "Minimum plus margin ($TARGET blocks) is not below the current size ($CUR); not shrinking."
+else
+  echo "Shrinking the filesystem from $CUR to $TARGET blocks of $BLKSZ ..."
+  resize2fs "$LOOPDEV" "$TARGET" || exit 1
+fi
+run_e2fsck "$LOOPDEV" "after resize"
+
+# resize2fs rounds; the partition must match what it actually produced, not
+# what it was asked for.
+NEW="$(dumpe2fs -h "$LOOPDEV" 2>/dev/null | awk '/^Block count:/ {print $3}')"
+case "$NEW" in
+  ''|*[!0-9]*) echo "Error: could not read the new block count from dumpe2fs." >&2 ; exit 1 ;;
+esac
+
+#################################################################
+# Zero the remaining free space, so the image compresses to its content
+
+echo
+echo "Zeroing the free space ..."
+MNT="$(mktemp -d /tmp/prepare-base-image.XXXXXX)" || exit 1
+mount -t ext4 -o rw,noatime,nodev,nosuid "$LOOPDEV" "$MNT" || exit 1
+mountpoint -q "$MNT" || { echo "Error: internal, $MNT is not a mount point." >&2 ; exit 1 ; }
+# Runs as root, so this fills the reserved blocks too. Running out of space is
+# the expected end of it.
+dd if=/dev/zero of="$MNT/ZEROFILL" bs=4M status=none 2>/dev/null
+# The sync is not optional: with delayed allocation, deleting the fill file
+# before writeback would throw the pages away unwritten and leave the old data
+# where it was.
+sync
+rm -f "$MNT/ZEROFILL" || exit 1
+sync
+umount "$MNT" || exit 1
+rmdir "$MNT" ; MNT=""
+
+# After the last mount, or the superblock would ship the mount point used here,
+# i.e. a directory name from the machine that built the image.
+tune2fs -M / "$LOOPDEV" >/dev/null || exit 1
+
+run_e2fsck "$LOOPDEV" "final"
+losetup -d "$LOOPDEV" ; LOOPDEV=""
+
+#################################################################
+# Partition table and image size
+
+NEWSECT=$((NEW * SPB))
+echo
+echo "Shrinking partition 1 to $NEWSECT sectors and truncating the image ..."
+# Must happen before the truncate: a partition reaching past the end of the
+# file would be rejected. sfdisk keeps start, type and the boot flag; it does
+# rewrite the CHS fields with its own guessed geometry, which is harmless - the
+# AM335x ROM loads MLO from a fixed offset without reading the partition table,
+# and u-boot uses the LBA fields.
+echo ",$NEWSECT" | sfdisk --no-reread --no-tell-kernel -N 1 "$TMPOUT" || exit 1
+truncate -s $(( (START + NEWSECT) * 512 )) "$TMPOUT" || exit 1
+
+NEWTABLE="$(sfdisk -d "$TMPOUT" 2>/dev/null)"
+NEWPART="$(echo "$NEWTABLE" | grep 'start=')"
+NEWSTART="$(echo "$NEWPART" | sed -n 's/.*start= *\([0-9]*\).*/\1/p')"
+if [ "$NEWSTART" != "$START" ] \
+   || ! echo "$NEWPART" | grep -q 'type=83' \
+   || ! echo "$NEWPART" | grep -q 'bootable' ; then
+  echo "Error: the partition entry of $TMPOUT changed more than its size:" >&2
+  echo "  $NEWPART" >&2
+  exit 1
+fi
+
+if [ "$(raw_digest "$TMPOUT")" != "$(raw_digest "$SRC")" ]; then
+  echo "Error: the boot area (sectors 0..$((START - 1))) of $TMPOUT differs from $SRC" >&2
+  echo "outside the partition table. MLO/u-boot would not be intact." >&2
+  exit 1
+fi
+
+# Final check without root privileges or a loop device: e2fsprogs takes the
+# filesystem offset within the file directly.
+e2fsck -f -n "$TMPOUT?offset=$((START * 512))" >/dev/null 2>&1
+FINAL_FSCK=$?
+if [ $FINAL_FSCK -ne 0 ]; then
+  echo "Error: the finished filesystem in $TMPOUT is not clean (e2fsck -fn exit $FINAL_FSCK)." >&2
+  exit 1
+fi
+
+mv -f "$TMPOUT" "$OUT" || exit 1
+if [ -n "$SUDO_UID" ] && [ -n "$SUDO_GID" ]; then
+  chown "$SUDO_UID:$SUDO_GID" "$OUT" "$OUTDIR" || exit 1
+fi
+
+#################################################################
+# Summary
+
+OUTBYTES="$(stat -c%s "$OUT")"
+USEDBLK="$(dumpe2fs -h "$OUT?offset=$((START * 512))" 2>/dev/null \
+           | awk '/^Block count:/ {c = $3} /^Free blocks:/ {f = $3} END {print c - f}')"
+
+echo
+echo "Base image: $OUT"
+echo "  Source          $SRC ($((SRCBYTES / 1024 / 1024)) MiB)"
+echo "  Partition 1     start $NEWSTART (unchanged), $NEWSECT sectors, type 83, bootable"
+echo "  Boot area       sectors 0..$((START - 1)) preserved byte for byte (MLO, u-boot)"
+echo "  Filesystem      ext4, $BLKSZ byte blocks, $USEDBLK of $NEW blocks used"
+echo "                  minimum was $MIN blocks, plus $SLACK_MIB MiB margin"
+echo "  Removed         $REMOVED of $((REMOVED + $(echo $MISSING | wc -w))) tree entries, $SYMLINKS example links, $FREED_MIB MiB"
+if [ -n "$MISSING" ]; then
+  echo "                  not present:$MISSING"
+fi
+echo "  Scrubbed        ssh host keys (regenerated on boot), network and connman"
+echo "                  config, dhcp leases, random seed, logs, histories, apt cache"
+echo "  First boot      $GROW_UNIT_NAME grows the card, then reboots once"
+echo "                  marker $GROW_MARKER"
+echo "  Image size      $((OUTBYTES / 1024 / 1024)) MiB, filesystem clean"
+if [ -n "$SUDO_UID" ]; then
+  echo "  Owner           $(stat -c '%U:%G' "$OUT")"
+fi
+echo
+echo "Write it to a card with:"
+echo "  sudo dd if=$OUT of=/dev/sdX bs=4M conv=fsync status=progress"
