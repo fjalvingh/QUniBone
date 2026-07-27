@@ -25,6 +25,13 @@ UNIBUS and QBUS are similar enough to share almost all code. Differences are han
   (QBUS), e.g. `qunibussignals_u.cpp` / `qunibussignals_q.cpp`, `pru1_u/` / `pru1_q/`.
 - **Directory suffixes + symlinks**: e.g. `10.01_base/4_deploy_q` is a real directory; `4_deploy` is
   created as a symlink to whichever variant applies. This linking is done by `qunibone-platform.sh`.
+- **Directory suffixes + overlay copy**: the example applications come in three trees —
+  `10.03_app_demo/5_applications` (what runs on either bus), `5_applications_u` and
+  `5_applications_q`. Here `qunibone-platform.sh` does not link but *copies* the platform tree over
+  the common one, so an installed machine has a single `5_applications`. A file belongs in the
+  common tree only when the UNIBUS and QBUS copies are byte for byte identical — a disk image
+  carries the drivers of the machine it was built for, so equal names never imply equal disks. A
+  script in one tree may name an image in another; they meet only after that copy.
 
 `QUNIBONE_PLATFORM=UNIBUS|QBUS` in `qunibone-platform.env` (repo root) is the **single** setting
 that picks the bus, for every build path — `compile.sh` on the BeagleBone, `crossco` on an x64 host,

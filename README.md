@@ -57,12 +57,19 @@ you started it from.
 
 ### Ready-to-run example applications
 
-`10.03_app_demo/5_applications_u` now holds the ready-made setups themselves — RT-11, RSX-11M, UNIX
-V6, 2.11BSD, XXDP and more — each a single executable script, run as `sudo ./rt11v5.5.dlx.sh`. Their
+`10.03_app_demo/5_applications` now holds the ready-made setups themselves — RT-11, RSX-11M, UNIX V6,
+2.11BSD, XXDP, VMS and more — each a single executable script, run as `sudo ./rt11v5.5.dlx.sh`. Their
 disk images and bootloaders are shared between the examples, kept compressed, and unpacked on first
-use. The examples are bus-specific, so they carry the usual `_u`/`_q` suffix: these are the UNIBUS
-ones, and installing on the hardware (`qunibone-platform.sh`) copies the set that fits into plain
-`5_applications`, which is the directory every path below refers to.
+use.
+
+Both buses have a set. What runs unchanged on either is in `5_applications`, the rest in
+`5_applications_u` (UNIBUS: the emulated CPUs, the M9312, UNIX V1, Mini-UNIX) and
+`5_applications_q` (QBUS: three MicroVAX II systems, RSX-11M-PLUS, VMS). Installing on the hardware
+(`qunibone-platform.sh`) copies the tree for the bus over the common one, so a running machine has a
+single `5_applications` with everything that fits it — which is the directory every path below
+refers to. A file is only in the common tree if the two buses' copies are byte for byte the same; a
+disk image carries the drivers of the machine it was built for, so two disks of the same name are
+not assumed to be the same disk.
 
 Each example used to be a `.sh` wrapper plus the `.cmd` file it started, beside its own copies of the
 disk images and bootloader listings it needed — the XXDP 2.5 disk existed three times over, `dl.lst`

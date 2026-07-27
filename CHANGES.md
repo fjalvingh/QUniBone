@@ -2,6 +2,75 @@
 
 Notable changes to QUniBone, newest first.
 
+### One common tree for the examples both buses run
+
+With a QBUS example set beside the UNIBUS one, most of it was the same file twice: 45 disk images,
+the five bootloader listings and eleven scripts were byte for byte identical in both trees.
+
+- `10.03_app_demo/5_applications` holds those now, beside `5_applications_u` (UNIBUS only) and
+  `5_applications_q` (QBUS only) — the three-way split `qunibone-platform.sh` has always expected.
+  It copies `5_applications_<u|q>` over `5_applications`, so an installed machine still sees one
+  directory: the common examples plus the ones for its bus. A bus-specific script may name an image
+  of the common tree and the other way round; the two meet at that copy. `.gitignore` is the only
+  path that exists in more than one tree.
+- Moved into it: the 45 images (the 33-floppy RX01 archive, `xxdp22/25/+`, `rt11v5.5*`,
+  `RTRKV4.00`, `RT11.rx02`, `rsxdl1/2/3`, `rsxm70.rl02`, the LSX floppies) with the `.url`/`.pdf`
+  recording where they came from, the five listings (`dk`, `dl`, `du`, `dx`, `dy`), and the scripts
+  of `lsx.rx01`, `memory`, `rt11.mscp`, `rt11.rk05`, `rt11.rl02`, `rt11.rx01`, `rt11.rx02`,
+  `xxdp.rl02` plus `memory/zkma.ptap`. 125 image files across the two trees are now 79 distinct
+  disks, 121 other files are 101.
+- **Nothing moved on the strength of its name.** Every image was expanded and compared by content,
+  and a file went to the common tree only when the two copies matched byte for byte: an image
+  carries the drivers of the machine it was built for, which the file name does not show. Two names
+  exist in both trees with different content and stayed bus-specific — `rsxm70.ra70.dsk.gz`, where
+  both are RSX-11M V4.8 BL70 packs labelled `RSXM70` but 4.4% of the blocks differ, and
+  `rsx11m_4_8_bl70.ra70.dsk.gz`, which are not even the same size.
+- Two duplicates found on the way: `rt11v5.5_34.rl02.dsk.gz` was the same disk as
+  `rt11v5.5.rl02.dsk.gz` under a second name *inside* the UNIBUS tree (`rt11v5.5_34.dlx.sh` now
+  mounts the common image); `rt11v54_ry0.sh` and `xxdp22-25.dlx.sh` differed between the buses by
+  one cosmetic line each and were unified.
+- `name_scheme.txt` is now one document for all three trees, in the common one, and states the
+  identical-content rule. The comment block of `qunibone-platform.sh` says the same in short.
+
+**Verified**: both installed views were built the way `qunibone-platform.sh` does and every file
+reference in them re-resolved, `.gz` fallback included. QBUS, 19 scripts: only `rsx11mp_4_8_bl70`
+is missing, which is why its script carries `.MISSING-IMAGE`. UNIBUS, 48 scripts: five unresolved
+names, all volumes a run creates on first use (`dl1`/`dl2`/`dl3.rl02`, `xxdp_test1.rl02`) and all
+unresolved before this change too. No hardware run.
+
+### The QBUS examples are in the repository
+
+`5_applications_q` had the QBone setups in the shape the UNIBUS ones were in before they were
+reworked: a `.sh` wrapper plus the `.cmd` file it started, every disk and every bootloader listing
+copied into the example that used it, under whatever extension it had arrived with. They are now in
+the same shape as the UNIBUS set, step for step.
+
+- 22 wrapper + `.cmd` pairs became 20 executable command files starting with
+  `#!/root/10.03_app_demo/4_deploy/demo`, then 18 after two byte-identical pairs were merged
+  (`rt11v5.5.dlx.sh`, `xxdp22-25.dlx.sh` — the drive number in the old names said which start
+  address the operator types, not what the script does).
+- All 56 images went into `5_applications_q/diskimages` as `<name>.<medium>.dsk[.gz]`, the medium
+  from what the script sets `p type` to. They had arrived as `.dsk`, `.rl02`, `.img`, `.RX2`,
+  `.r54`, `.RL2` and bare `.gz`. Expanded and compared by content, all 56 were different: unlike
+  the UNIBUS set this collection had one copy of each disk already, what it lacked was one place
+  and one naming. Eleven bootloader listings became five in `5_applications_q/bootloaders`.
+- New in the QBUS set, with no UNIBUS counterpart: three MicroVAX II (KA630) examples —
+  `43bsd_uvax.mscp`, `vms44_uvax.rl02`, `vms73_uvax.mscp` — which boot from their own console ROM
+  and so deposit no bootloader, and the `rd53`/`rd54` MSCP disks of the RQDX3. No emulated CPU and
+  no M9312: both are UNIBUS-only.
+- A script whose image is not available is renamed to `.sh.MISSING-IMAGE` and made
+  non-executable. One remains, `rsx11mp4.8_du0+rl_23_73.sh.MISSING-IMAGE`, short of an RSX-11M-PLUS
+  V4.8 pack that is in neither tree. A second one was resurrected: the image it wanted turned out
+  to be present under a shortened name, identified from its own boot banner and ODS-1 home block as
+  RSX-11M V4.8 BL70, volume `RSXM70`, and renamed `rsxm70.ra70.dsk.gz`.
+- `JH_DU1.ra70.dsk.gz` is 296 MB, over GitHub's limit for a single file, and is excluded by name in
+  `5_applications_q/.gitignore` with a `.txt` beside it giving its checksums — the uda1 data disk of
+  the RSX-11M-PLUS example, not a disk anything boots from.
+
+**Verified**: all 61 file references in the finished scripts resolve, `.gz` fallback included,
+apart from the one missing image above and the volumes a run creates on first use. Cross-checked on
+paths only; no QBone hardware run.
+
 ### The example applications are bus-specific: `5_applications_u`
 
 Every ready-made setup in `10.03_app_demo/5_applications` configures UNIBUS controllers (RL11, RK11,
