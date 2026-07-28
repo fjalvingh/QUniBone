@@ -105,7 +105,7 @@ build, and on demand with `./crossco -c` after adding or removing source files.
 ### Building a distribution image
 
 `sudo ./build-sdcard-image -u|-q <capture>` turns a raw `dd` capture of a working UniBone/QBone card
-into `imgbuild/unibone-empty.img` or `imgbuild/qbone-empty.img`: the card's software tree removed and
+into `imgbuild/unibone-sdcard-<date>.img` or `imgbuild/qbone-sdcard-<date>.img`: the card's software tree removed and
 its machine identity scrubbed, this checkout release built for that bus and installed in its place
 (`.git` included, personalized as a board would be), shrunk to just above what it uses, and growing
 itself back to the whole card on the first boot. See [COMPILING.md](COMPILING.md).

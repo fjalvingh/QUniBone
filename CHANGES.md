@@ -11,9 +11,11 @@ something else, so it is called **`build-sdcard-image`**; the old name stays on 
 delete list, since a capture may predate the rename.
 
 - The bus is mandatory: `-u` (UniBone/UNIBUS) or `-q` (QBone/QBUS). It names the result
-  `imgbuild/unibone-empty.img` or `imgbuild/qbone-empty.img` — a fixed name per bus, instead of the
-  capture's own name with `-clean` appended, because what the image contains no longer depends on
-  which card it started from.
+  `imgbuild/unibone-sdcard-<date>.img` or `imgbuild/qbone-sdcard-<date>.img`, instead of the capture's
+  own name with `-clean` appended: what the image contains no longer depends on which card it started
+  from, only on the bus and on the day it was built — which is also the day of the software in it,
+  since the software is built as part of the run. A second run on the same day writes the same name
+  and needs `-f`.
 - *Before* the image is touched, the script release builds this checkout with `./crossco -a -r`, so a
   failing build costs nothing instead of arriving after minutes of copying and checking. `-a` is
   required, not cosmetic: `make` does not know that

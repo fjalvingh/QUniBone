@@ -142,8 +142,8 @@ built software tree on it. The bus is mandatory and decides everything: the name
 the software is built for, and how the installed tree is personalized.
 
 ```bash
-sudo ./build-sdcard-image -q ~/Downloads/sdcard_qbone_2025_06_09.dd   # -> imgbuild/qbone-empty.img
-sudo ./build-sdcard-image -u ~/Downloads/sdcard_unibone.dd            # -> imgbuild/unibone-empty.img
+sudo ./build-sdcard-image -q ~/Downloads/sdcard_qbone_2025_06_09.dd   # -> imgbuild/qbone-sdcard-2026-07-28.img
+sudo ./build-sdcard-image -u ~/Downloads/sdcard_unibone.dd            # -> imgbuild/unibone-sdcard-2026-07-28.img
 sudo ./build-sdcard-image -q -f <image>      # overwrite an existing output image
 sudo ./build-sdcard-image -q -k <image>      # keep /var/lib/apt/lists (default: emptied)
 sudo ./build-sdcard-image -q -s 500 <image>  # free space in MiB above the filesystem minimum (default 300)
@@ -154,8 +154,11 @@ does with it is described here rather than on screen. It refuses rather than ask
 would be expensive — an output image that already exists needs `-f`, and a capture that is not a
 single bootable ext4 partition starting at sector 8192 is rejected outright.
 
-The result is `imgbuild/qbone-empty.img` or `imgbuild/unibone-empty.img`. `imgbuild/` is gitignored,
-and the finished image is chowned back to the user who invoked `sudo`. The input file is never
+The result is `imgbuild/qbone-sdcard-<date>.img` or `imgbuild/unibone-sdcard-<date>.img`, dated with
+the day it was built — which is also the day of the software in it, since the software is built as
+part of the run. Two images for one bus differ by nothing else, so the date is the only part of the
+name worth varying; a second run on the same day writes the same name and needs `-f`. `imgbuild/` is
+gitignored, and the finished image is chowned back to the user who invoked `sudo`. The input file is never
 modified. Root is required for `losetup`/`mount`/`e2fsck`; the script says so rather than re-invoking
 itself under `sudo`. During the run it needs free space for a copy of everything up to the end of the
 partition — about 15 GB for a 16 GB card.

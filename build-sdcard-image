@@ -24,8 +24,8 @@
 #     and the free space is zeroed so the result compresses well
 #   - the image grows itself back to the whole card on the first boot
 #
-# The bus is mandatory (-u/-q): it names the result unibone-empty.img or
-# qbone-empty.img, and it is what the tree is built and personalized for.
+# The bus is mandatory (-u/-q): it names the result unibone-sdcard-<date>.img or
+# qbone-sdcard-<date>.img, and it is what the tree is built and personalized for.
 #
 # The input file is never modified; the result is written to imgbuild/.
 #
@@ -55,8 +55,8 @@ ORIG_ARGS="$*"
 usage() {
   echo "Usage: $0 -u|-q [-f] [-k] [-s <MiB>] <raw-image>" >&2
   echo "  <raw-image>  raw 'dd' capture of a UniBone/QBone SD card" >&2
-  echo "  -u           build a UniBone (UNIBUS) image: unibone-empty.img" >&2
-  echo "  -q           build a QBone (QBUS) image: qbone-empty.img" >&2
+  echo "  -u           build a UniBone (UNIBUS) image: unibone-sdcard-<date>.img" >&2
+  echo "  -q           build a QBone (QBUS) image: qbone-sdcard-<date>.img" >&2
   echo "  -f           overwrite an existing output image" >&2
   echo "  -k           keep /var/lib/apt/lists (default: emptied)" >&2
   echo "  -s <MiB>     free space above the filesystem minimum (default $SLACK_MIB)" >&2
@@ -108,10 +108,13 @@ if [ -z "$PLATFORM" ]; then
 fi
 
 # Everything the bus decides: the file tree suffix, the name of the result, and
-# what the tree is built for.
+# what the tree is built for. The date is the day the image was built, which is
+# also the day of the software in it - two images of one bus differ by nothing
+# else, so it is the only part of the name worth varying.
+IMAGE_DATE="$(date +%Y-%m-%d)"
 case "$PLATFORM" in
-  UNIBUS) SUFFIX=_u ; OTHER_SUFFIX=_q ; BOARD=UniBone ; IMAGE_NAME=unibone-empty.img ;;
-  QBUS)   SUFFIX=_q ; OTHER_SUFFIX=_u ; BOARD=QBone   ; IMAGE_NAME=qbone-empty.img   ;;
+  UNIBUS) SUFFIX=_u ; OTHER_SUFFIX=_q ; BOARD=UniBone ; IMAGE_NAME="unibone-sdcard-$IMAGE_DATE.img" ;;
+  QBUS)   SUFFIX=_q ; OTHER_SUFFIX=_u ; BOARD=QBone   ; IMAGE_NAME="qbone-sdcard-$IMAGE_DATE.img"   ;;
 esac
 
 if [ "$(id -u)" -ne 0 ]; then
