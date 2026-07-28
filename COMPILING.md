@@ -145,10 +145,14 @@ the software is built for, and how the installed tree is personalized.
 sudo ./build-sdcard-image -q ~/Downloads/sdcard_qbone_2025_06_09.dd   # -> imgbuild/qbone-empty.img
 sudo ./build-sdcard-image -u ~/Downloads/sdcard_unibone.dd            # -> imgbuild/unibone-empty.img
 sudo ./build-sdcard-image -q -f <image>      # overwrite an existing output image
-sudo ./build-sdcard-image -q -y <image>      # do not ask for confirmation
 sudo ./build-sdcard-image -q -k <image>      # keep /var/lib/apt/lists (default: emptied)
 sudo ./build-sdcard-image -q -s 500 <image>  # free space in MiB above the filesystem minimum (default 300)
 ```
+
+It asks nothing and runs to the end: everything it needs to know is on that commandline, and what it
+does with it is described here rather than on screen. It refuses rather than asks where a mistake
+would be expensive — an output image that already exists needs `-f`, and a capture that is not a
+single bootable ext4 partition starting at sector 8192 is rejected outright.
 
 The result is `imgbuild/qbone-empty.img` or `imgbuild/unibone-empty.img`. `imgbuild/` is gitignored,
 and the finished image is chowned back to the user who invoked `sudo`. The input file is never
@@ -175,8 +179,10 @@ would look for the toolchain under root's `$HOME`.
 `./crossco` takes the bus from `qunibone-platform.env` — the single place where it is configured —
 and cannot be told on the commandline, so `-u`/`-q` **rewrites that file**. It is gitignored, local
 to the machine and created by the scripts themselves; rewriting it is the only way `-u`/`-q` can mean
-anything for the software in the image. The script says so before it does it, and the setting stays,
-so a later plain `./crossco` builds for the same bus.
+anything for the software in the image. That change outlives the run — it is the one thing the script
+does outside the image — so a plain `./crossco` or `./compile.sh` afterwards builds for the bus of the
+last image you made. It is also the last thing the script prints, as a warning, whenever it had to
+change it.
 
 The whole checkout is then copied into `/root` of the image, `.git` included, and personalized
 exactly as `qunibone-platform.sh` does on a running board: `5_applications_u|_q` merged into

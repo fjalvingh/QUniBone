@@ -45,7 +45,6 @@ GROW_MARKER=/var/lib/qunibone-grown
 REQUIRED_START_SECTOR=8192
 
 FORCE=0
-ASSUME_YES=0
 KEEP_APT_LISTS=0
 SLACK_MIB=300
 SRC=""
@@ -54,12 +53,11 @@ PLATFORM=""
 ORIG_ARGS="$*"
 
 usage() {
-  echo "Usage: $0 -u|-q [-f] [-y] [-k] [-s <MiB>] <raw-image>" >&2
+  echo "Usage: $0 -u|-q [-f] [-k] [-s <MiB>] <raw-image>" >&2
   echo "  <raw-image>  raw 'dd' capture of a UniBone/QBone SD card" >&2
   echo "  -u           build a UniBone (UNIBUS) image: unibone-empty.img" >&2
   echo "  -q           build a QBone (QBUS) image: qbone-empty.img" >&2
   echo "  -f           overwrite an existing output image" >&2
-  echo "  -y           do not ask for confirmation" >&2
   echo "  -k           keep /var/lib/apt/lists (default: emptied)" >&2
   echo "  -s <MiB>     free space above the filesystem minimum (default $SLACK_MIB)" >&2
 }
@@ -77,7 +75,6 @@ while [ $# -gt 0 ]; do
       PLATFORM="$p"
       ;;
     -f) FORCE=1 ;;
-    -y) ASSUME_YES=1 ;;
     -k) KEEP_APT_LISTS=1 ;;
     -s)
       shift
@@ -138,8 +135,8 @@ done
 # is configured (see qunibone-platform-env.sh); it cannot be told on the
 # commandline. So -u/-q here selects it there: that file is gitignored, local to
 # this machine and created by the scripts themselves, and rewriting it is the
-# only way -u/-q can mean anything for the software in the image. Announced
-# below, since it also changes what a later plain ./crossco builds.
+# only way -u/-q can mean anything for the software in the image. It outlives
+# the run, so the last thing printed says so.
 
 PLATFORM_ENV="$SCRIPT_DIR/qunibone-platform.env"
 PLATFORM_ENV_EXAMPLE="$PLATFORM_ENV.example"
@@ -286,49 +283,15 @@ DELETE_FILES="compile.sh cleanup.sh demo.sh github-sync.sh qunibone-platform.sh
 # mirror config) exists only on a card, nowhere in this repository.
 DELETE_SUBDIRS="02_bbb_config/01_cape"
 
-echo "Preparing a $BOARD distribution image."
+# What this run is about. What it does to a capture is described in COMPILING.md,
+# not here: there is nothing to decide at this point, so there is nothing to read.
+echo "Building a $BOARD distribution image."
 echo
 echo "  Source        $SRC ($((SRCBYTES / 1024 / 1024)) MiB)"
 echo "  Partition 1   start $START, $SIZE sectors, type 83, bootable, ext4"
 echo "  Bus           $PLATFORM ($BOARD), tree suffix $SUFFIX"
 echo "  Software      $SCRIPT_DIR"
 echo "  Output        $OUT"
-echo
-echo "It removes the QUniBone software tree from /root of the image:"
-echo "  $(echo $DELETE_DIRS) $DELETE_SUBDIRS"
-echo "  and the scripts, examples and settings of the repository next to it,"
-echo "  plus the ~/*.sh links into 10.03_app_demo/5_applications."
-echo "It keeps 91_3rd_party (PRU toolchain), 02_bbb_config/03_debian-8.10.0-armhf"
-echo "  (apt mirror config), cape.eeprom and root's own dotfiles: none of those"
-echo "  can be rebuilt from this repository."
-echo "It scrubs machine identity: ssh host keys, network and connman config,"
-echo "  dhcp leases, random seed, logs, shell histories, apt cache."
-echo "It then release builds this checkout for $PLATFORM with ./crossco -a -r and"
-echo "  installs it into /root, .git included, personalized for $BOARD:"
-echo "  5_applications$SUFFIX merged into 5_applications, 4_deploy -> 4_deploy$SUFFIX,"
-echo "  and the ~/*.sh example links recreated."
-if [ "$PLATFORM_ENV_CHANGES" -eq 1 ]; then
-  echo "  qunibone-platform.env selects ${CURRENT_PLATFORM:-nothing valid} and will be set to"
-  echo "  QUNIBONE_PLATFORM=$PLATFORM - that is also what a later ./crossco builds."
-fi
-if [ -z "$BUILD_USER" ]; then
-  echo "  SUDO_USER is not set, so the build runs as root and leaves root-owned"
-  echo "  build output in $SCRIPT_DIR."
-else
-  echo "  The build itself runs as $BUILD_USER, not as root."
-fi
-echo "It shrinks the filesystem to its minimum plus $SLACK_MIB MiB and zeroes the"
-echo "  remaining free space, and installs $GROW_UNIT_NAME,"
-echo "  which grows the card back on the first boot and reboots once."
-echo
-echo "$SRC itself is not modified."
-if [ "$ASSUME_YES" -eq 0 ]; then
-  read -p "Are you sure [y/*] ? "
-  if [[ ! $REPLY =~ ^[Yy]$ ]] ; then
-    echo "OK, abort."
-    exit 1
-  fi
-fi
 
 #################################################################
 # Build the software that goes into the image
@@ -359,6 +322,8 @@ echo "Release building $SCRIPT_DIR for $PLATFORM ..."
 if [ -n "$BUILD_USER" ]; then
   sudo -u "$BUILD_USER" -H "$SCRIPT_DIR/crossco" -a -r
 else
+  echo "Warning: SUDO_USER is not set, so the build runs as root and leaves" >&2
+  echo "         root-owned build output in $SCRIPT_DIR." >&2
   "$SCRIPT_DIR/crossco" -a -r
 fi
 if [ $? -ne 0 ]; then
@@ -897,3 +862,13 @@ fi
 echo
 echo "Write it to a card with:"
 echo "  sudo dd if=$OUT of=/dev/sdX bs=4M conv=fsync status=progress"
+
+# The one thing this run changed outside the image, and the only one that
+# outlives it. Last, so it is still on screen when the run ends.
+if [ "$PLATFORM_ENV_CHANGES" -eq 1 ]; then
+  echo
+  echo "WARNING: the build platform of $SCRIPT_DIR was changed."
+  echo "  qunibone-platform.env selected ${CURRENT_PLATFORM:-no valid platform} and now selects $PLATFORM."
+  echo "  It is the single setting that picks the bus, so ./crossco and compile.sh"
+  echo "  build for $PLATFORM ($BOARD) until you set it back."
+fi

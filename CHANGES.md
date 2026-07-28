@@ -14,19 +14,25 @@ delete list, since a capture may predate the rename.
   `imgbuild/unibone-empty.img` or `imgbuild/qbone-empty.img` — a fixed name per bus, instead of the
   capture's own name with `-clean` appended, because what the image contains no longer depends on
   which card it started from.
-- After the confirmation and *before* the image is touched, the script release builds this checkout
-  with `./crossco -a -r`, so a failing build costs nothing instead of arriving after minutes of
-  copying and checking. `-a` is required, not cosmetic: `make` does not know that
+- *Before* the image is touched, the script release builds this checkout with `./crossco -a -r`, so a
+  failing build costs nothing instead of arriving after minutes of copying and checking. `-a` is
+  required, not cosmetic: `make` does not know that
   `MAKE_CONFIGURATION` changed, so an incremental build after a `DBG` one would relink the debug
   objects and call them a release build. The build runs as `$SUDO_USER` — as root it would leave a
   tree of root-owned objects behind and look for the toolchain under root's `$HOME`. `demo` is then
   checked to be an ARM binary, which catches a `crosscompile.env` whose `BBB_CC` is the host
   compiler.
 - `./crossco` takes the bus from `qunibone-platform.env` and cannot be told on the commandline, so
-  `-u`/`-q` rewrites that file (announced before it happens, and the setting stays). That file is
-  gitignored, local to the machine and created by the scripts themselves; rewriting it is the only
-  way the flag can mean anything for the software in the image, and it keeps the "one place, one
-  variable" rule intact.
+  `-u`/`-q` rewrites that file. It is gitignored, local to the machine and created by the scripts
+  themselves; rewriting it is the only way the flag can mean anything for the software in the image,
+  and it keeps the "one place, one variable" rule intact. The change outlives the run — it is the
+  only thing the script leaves behind outside the image — so it is the last thing printed, as a
+  warning naming the old and the new platform.
+- The confirmation prompt and the block of text explaining what the run would do are gone, together
+  with the `-y` that turned them off. Everything the script needs is on the commandline, so there was
+  nothing to decide; what it does with a capture belongs in `COMPILING.md`, which is where it now is.
+  Where a mistake would be expensive the script still refuses rather than asks: an existing output
+  needs `-f`, and a capture that is not a single bootable ext4 partition at sector 8192 is rejected.
 - The checkout is installed into `/root` of the image with `tar` — one exclude list, symlinks,
   permissions and `.git` included — while the filesystem still has the captured card's size. Doing it
   after the shrink would mean fitting 1.2 GB of tree into the 300 MiB margin. What stays out: the
