@@ -54,6 +54,18 @@ else
 $(error Set MAKE_CONFIGURATION to RELEASE or DBG!)
 endif
 
+# CC_CODE_FLAGS: conditional compiles that must be identical for the ARM code
+# and both PRU firmwares, so it is passed down to the PRU sub-makes below.
+CC_CODE_FLAGS = $(PLATFORM_CCDEFS) -DBLINKENLIGHT_CLIENT
+
+# NO_PHYSICAL_BUS:
+# Special build to run UniBone/QBone without a physical UNIBUS/QBUS, outside a
+# terminated backplane. Then the simulation is pure virtual ... makes only sense
+# when the simulated CPU is active.
+# Intended for developers, who don't like to heat a real PDP-11 just for testing
+# their code.
+# CC_CODE_FLAGS += -DNO_PHYSICAL_BUS
+
 # Both build paths target the BeagleBone's AM335x: let the compiler schedule
 # for its Cortex-A8 instead of a generic ARM.
 ifeq ($(MAKE_TARGET_ARCH),BBB)
@@ -82,8 +94,7 @@ CCFLAGS= \
 	-I$(DEVEXER_SRC_DIR)	\
 	-I$(OBJDIR)	\
 	-I$(PRU_DEPLOY_DIR)	\
-	$(PLATFORM_CCDEFS)        \
-	-DBLINKENLIGHT_CLIENT        \
+	$(CC_CODE_FLAGS)        \
 	-c	\
 	$(CCDEFS) $(CC_DBG_FLAGS) $(OS_CCDEFS)
 # OBJDIR in includes because of $(PRU_CODE)
@@ -518,9 +529,9 @@ $(OBJDIR)/qunibusadapter.o :  $(BASE_SRC_DIR)/qunibusadapter.cpp $(BASE_SRC_DIR)
 # and converted to a C array source code by hexpru -- array
 #  $(SHARED_SRC_DIR)/*.h $(SHARED_SRC_DIR)/*.c
 $(PRU0_CODE_LIST): $(PRU0_BASE_SRC_DIR)/*.h $(PRU0_BASE_SRC_DIR)/*.c $(SHARED_SRC_DIR)/*.h
-	$(MAKE) -C $(PRU0_BASE_SRC_DIR) $@
+	$(MAKE) -C $(PRU0_BASE_SRC_DIR) CC_CODE_FLAGS="$(CC_CODE_FLAGS)" $@
 	echo PRU0 codefile $@ created
 
 $(PRU1_CODE_LIST): $(PRU1_BASE_SRC_DIR)/*.h $(PRU1_BASE_SRC_DIR)/*.c $(SHARED_SRC_DIR)/*.h
-	$(MAKE) -C $(PRU1_BASE_SRC_DIR) $@
+	$(MAKE) -C $(PRU1_BASE_SRC_DIR) CC_CODE_FLAGS="$(CC_CODE_FLAGS)" $@
 	echo PRU1 codefile $@ created

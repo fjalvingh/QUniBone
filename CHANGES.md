@@ -2,6 +2,32 @@
 
 Notable changes to QUniBone, newest first.
 
+### Merged upstream: `CC_CODE_FLAGS` and `NO_PHYSICAL_BUS`, LF line endings everywhere
+
+Merge of Joerg Hoppe's `QUniBone` up to `229b11e`. Two upstream commits: a build option, and the
+repository-wide CRLF→LF repair plus the `.gitattributes` that keeps it repaired.
+
+- **`NO_PHYSICAL_BUS`** builds the emulator with an internal, purely virtual UNIBUS/QBUS, for
+  developers without DEC hardware to hang it on. It only means something if the ARM code and *both*
+  PRU firmwares agree on it, so upstream introduced `CC_CODE_FLAGS` as the one variable carrying the
+  defines that must match, and passes it down to the PRU sub-makes. Upstream sets it per bus in the
+  monolithic `makefile_u`/`makefile_q`; here those are thin wrappers, so `CC_CODE_FLAGS` is built
+  once in `10.03_app_demo/2_src/makefile.common` from the `PLATFORM_CCDEFS` the wrapper already
+  sets, and the commented-out `CC_CODE_FLAGS += -DNO_PHYSICAL_BUS` line — the switch a developer
+  uncomments — sits there too, in one place for both buses instead of two copies to keep in step.
+  `10.01_base/2_src/pru1_u/Makefile` and `pru1_q/Makefile` take the flags from the parent make and
+  fall back to their own `-DUNIBUS`/`-DQBUS` when built standalone; that part merged unchanged.
+- **Line endings**: `.gitattributes` now pins every text type in the tree to LF, in the repository
+  and in the working copy, so a Windows editor cannot re-introduce CRLF and produce a diff touching
+  every line of a file. `README.md` was the one file on this side still stored with CRLF; it is
+  normalized. `duboot.lst`/`duboot.mac`, `LICENSE` and the two `pru1_buslatches.h` came over from
+  upstream with the same repair.
+
+Verified by cross-compile only, no hardware: `./crossco -a` for UNIBUS (green, including the 36 CPU
+core diagnostic runs and the `90_common` unit tests) and a full `QUNIBONE_PLATFORM=QBUS` build of
+`demo`, with `clpru` confirmed to receive `-DUNIBUS -DBLINKENLIGHT_CLIENT` / `-DQBUS
+-DBLINKENLIGHT_CLIENT` respectively.
+
 ### The distribution image is built for one bus and carries the software
 
 `prepare-base-image` produced a *base* image: a scrubbed card with no software on it, leaving the
