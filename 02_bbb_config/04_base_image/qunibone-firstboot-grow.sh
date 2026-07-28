@@ -2,7 +2,7 @@
 #
 # One-shot first-boot helper of a QUniBone distribution image.
 # Installed into the image as /usr/local/sbin/qunibone-firstboot-grow.sh by
-# ./prepare-base-image, and started once by qunibone-firstboot-grow.service.
+# ./build-sdcard-image, and started once by qunibone-firstboot-grow.service.
 #
 # A distribution image is shrunk to just above the size of its filesystem, so
 # it fits on any card and writes quickly. This grows it back to the whole card.

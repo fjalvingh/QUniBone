@@ -102,9 +102,10 @@ definition" need a `compile_commands.json` at the repo root, which `crossco` gen
 [`bear`](https://github.com/rizsotto/Bear) (`sudo apt install bear`): automatically on the first
 build, and on demand with `./crossco -c` after adding or removing source files.
 
-### Building a distribution base image
+### Building a distribution image
 
-`./prepare-base-image` turns a raw `dd` capture of a working UniBone/QBone card into a small,
-generic base image: the software tree removed, machine identity scrubbed, shrunk to just above what
-it uses, and growing itself back to the whole card on the first boot. See
-[COMPILING.md](COMPILING.md).
+`sudo ./build-sdcard-image -u|-q <capture>` turns a raw `dd` capture of a working UniBone/QBone card
+into `imgbuild/unibone-empty.img` or `imgbuild/qbone-empty.img`: the card's software tree removed and
+its machine identity scrubbed, this checkout release built for that bus and installed in its place
+(`.git` included, personalized as a board would be), shrunk to just above what it uses, and growing
+itself back to the whole card on the first boot. See [COMPILING.md](COMPILING.md).

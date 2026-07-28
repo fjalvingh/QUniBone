@@ -2,6 +2,66 @@
 
 Notable changes to QUniBone, newest first.
 
+### The distribution image is built for one bus and carries the software
+
+`prepare-base-image` produced a *base* image: a scrubbed card with no software on it, leaving the
+build and the install as an undocumented manual step afterwards. It now does the whole job, for one
+bus, in one run — and the bus is what the flags are about. It is no longer preparing a base for
+something else, so it is called **`build-sdcard-image`**; the old name stays on the script's own
+delete list, since a capture may predate the rename.
+
+- The bus is mandatory: `-u` (UniBone/UNIBUS) or `-q` (QBone/QBUS). It names the result
+  `imgbuild/unibone-empty.img` or `imgbuild/qbone-empty.img` — a fixed name per bus, instead of the
+  capture's own name with `-clean` appended, because what the image contains no longer depends on
+  which card it started from.
+- After the confirmation and *before* the image is touched, the script release builds this checkout
+  with `./crossco -a -r`, so a failing build costs nothing instead of arriving after minutes of
+  copying and checking. `-a` is required, not cosmetic: `make` does not know that
+  `MAKE_CONFIGURATION` changed, so an incremental build after a `DBG` one would relink the debug
+  objects and call them a release build. The build runs as `$SUDO_USER` — as root it would leave a
+  tree of root-owned objects behind and look for the toolchain under root's `$HOME`. `demo` is then
+  checked to be an ARM binary, which catches a `crosscompile.env` whose `BBB_CC` is the host
+  compiler.
+- `./crossco` takes the bus from `qunibone-platform.env` and cannot be told on the commandline, so
+  `-u`/`-q` rewrites that file (announced before it happens, and the setting stays). That file is
+  gitignored, local to the machine and created by the scripts themselves; rewriting it is the only
+  way the flag can mean anything for the software in the image, and it keeps the "one place, one
+  variable" rule intact.
+- The checkout is installed into `/root` of the image with `tar` — one exclude list, symlinks,
+  permissions and `.git` included — while the filesystem still has the captured card's size. Doing it
+  after the shrink would mean fitting 1.2 GB of tree into the 300 MiB margin. What stays out: the
+  `imgbuild/` images themselves, `91_3rd_party` (the image's own copy is the one that cannot be
+  rebuilt from a checkout, and is on the keep list for that reason), `crosscompile.env` and
+  `compile_commands.json`, the host-compiled test binaries of `10.05_cputest/4_deploy` and
+  `90_common/4_deploy`, every `*.o`, the IDE directories, and the other bus's `4_deploy` and
+  `5_applications`. A size check refuses a capture too small to hold the software before anything is
+  written.
+- The installed tree is then personalized exactly as `qunibone-platform.sh` does on a board:
+  `5_applications_u|_q` merged into `5_applications` and both bus trees removed, `4_deploy` linked to
+  `4_deploy_u|_q`, the `~/*.sh` example shortcuts recreated, every `*.sh` executable. That script
+  cannot be called for this — it works on `$HOME` and would bake the build host's temporary mount
+  path into every link it creates — so the same steps are done here against in-image absolute paths.
+- The capture's `/root/.git` is now removed with the rest of its tree: merging a fresh checkout into
+  the one from the machine the card came from is not something to leave to chance.
+- `README.md` and `COMPILING.md` follow, including the note that `git status` in the image is not
+  clean: the merged and removed `5_applications` trees are deletions and the `chmod +x` are mode
+  changes, which is simply what an installed board looks like.
+- `.gitignore` gained `**/4_deploy_q/**` next to the `_u` line it always had, so a QBUS build no
+  longer shows up as untracked files. `10.01_base/4_deploy_q/.gitignore`, which is what keeps that
+  empty directory in the repository, stays tracked — ignoring a tracked file does not untrack it.
+
+**Verified**: cross-compile host only, on synthetic captures built for the purpose. A `-u` run over a
+6 GiB capture and a `-q` run over a 4 GiB one each came out at 2.7 GiB: `demo` an ARM ELF built with
+`-O3` (no `-ggdb3` anywhere in the build log) under `4_deploy_u|_q` with `4_deploy` linked to it, the
+merged `5_applications` holding both the common and the bus tree and neither `_u` nor `_q` left, 48
+resp. 19 `~/*.sh` links resolving inside the image, `.git` present, no `*.o` and none of the excluded
+paths, the keep list (`91_3rd_party`, the apt mirror config, `cape.eeprom`, `.profile`) untouched,
+everything owned by `root:root`, `e2fsck -fn` clean and the boot area identical to the capture. The
+`qunibone-platform.env` written for `-q` differs from the example in exactly the two platform lines.
+Refusals checked: an existing output without `-f`, both `-u` and `-q`, neither, and a 1200 MiB
+capture, which stops at "the tree needs 1225 MiB, the image has 1065 MiB free" with nothing mounted
+and no loop device left behind. No image was booted on real hardware.
+
 ### A card capture can be turned into a distribution base image
 
 A distribution starts from a raw `dd` capture of a working BeagleBone card, because that card is the

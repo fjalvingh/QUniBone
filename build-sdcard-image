@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Turn a raw "dd" capture of a working UniBone/QBone SD card into the base for
-# a distribution image.
+# Turn a raw "dd" capture of a working UniBone/QBone SD card into a ready to
+# write distribution image for one bus.
 #
 # A capture of a running card is the only place some of the setup exists: the
 # Debian armhf userland, the PRU toolchain in 91_3rd_party (gitignored), the
@@ -11,15 +11,21 @@
 # MAC-bound network config, shell history, WiFi credentials) and one day's
 # build of the QUniBone tree.
 #
-# This script strips it down to the part worth distributing:
+# This script strips it down to the part worth distributing and puts a fresh
+# tree on top:
 #   - everything behind the single partition is dropped
-#   - the QUniBone tree is removed from /root (a separate script installs a
-#     freshly built one), while the parts that cannot be rebuilt from this
-#     repository are kept
+#   - the QUniBone tree is removed from /root, while the parts that cannot be
+#     rebuilt from this repository are kept
 #   - machine-specific state is scrubbed
+#   - this checkout is release built with ./crossco and installed into /root,
+#     git repository included, and personalized for the bus exactly as
+#     qunibone-platform.sh does on a running board
 #   - the filesystem and the partition are shrunk to just above what is used,
 #     and the free space is zeroed so the result compresses well
 #   - the image grows itself back to the whole card on the first boot
+#
+# The bus is mandatory (-u/-q): it names the result unibone-empty.img or
+# qbone-empty.img, and it is what the tree is built and personalized for.
 #
 # The input file is never modified; the result is written to imgbuild/.
 #
@@ -43,12 +49,15 @@ ASSUME_YES=0
 KEEP_APT_LISTS=0
 SLACK_MIB=300
 SRC=""
+PLATFORM=""
 # kept for the "run it with sudo" hint, the parse loop below consumes "$@"
 ORIG_ARGS="$*"
 
 usage() {
-  echo "Usage: $0 [-f] [-y] [-k] [-s <MiB>] <raw-image>" >&2
+  echo "Usage: $0 -u|-q [-f] [-y] [-k] [-s <MiB>] <raw-image>" >&2
   echo "  <raw-image>  raw 'dd' capture of a UniBone/QBone SD card" >&2
+  echo "  -u           build a UniBone (UNIBUS) image: unibone-empty.img" >&2
+  echo "  -q           build a QBone (QBUS) image: qbone-empty.img" >&2
   echo "  -f           overwrite an existing output image" >&2
   echo "  -y           do not ask for confirmation" >&2
   echo "  -k           keep /var/lib/apt/lists (default: emptied)" >&2
@@ -57,6 +66,16 @@ usage() {
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    -u|-q)
+      # The bus is what the image is named, built and personalized for.
+      case "$1" in -u) p=UNIBUS ;; -q) p=QBUS ;; esac
+      if [ -n "$PLATFORM" ] && [ "$PLATFORM" != "$p" ]; then
+        echo "Error: -u and -q are mutually exclusive." >&2
+        usage
+        exit 1
+      fi
+      PLATFORM="$p"
+      ;;
     -f) FORCE=1 ;;
     -y) ASSUME_YES=1 ;;
     -k) KEEP_APT_LISTS=1 ;;
@@ -85,6 +104,19 @@ if [ -z "$SRC" ]; then
   exit 1
 fi
 
+if [ -z "$PLATFORM" ]; then
+  echo "Error: the target bus is mandatory: -u for UniBone (UNIBUS), -q for QBone (QBUS)." >&2
+  usage
+  exit 1
+fi
+
+# Everything the bus decides: the file tree suffix, the name of the result, and
+# what the tree is built for.
+case "$PLATFORM" in
+  UNIBUS) SUFFIX=_u ; OTHER_SUFFIX=_q ; BOARD=UniBone ; IMAGE_NAME=unibone-empty.img ;;
+  QBUS)   SUFFIX=_q ; OTHER_SUFFIX=_u ; BOARD=QBone   ; IMAGE_NAME=qbone-empty.img   ;;
+esac
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "Error: $0 needs root for losetup/mount/e2fsck." >&2
   echo "Run: sudo $0 $ORIG_ARGS" >&2
@@ -100,6 +132,46 @@ for f in "$PAYLOAD_DIR/$GROW_SCRIPT_NAME" "$PAYLOAD_DIR/$GROW_UNIT_NAME" ; do
 done
 
 #################################################################
+# The build: this checkout, release built for the requested bus
+#
+# ./crossco takes the bus from qunibone-platform.env, the single place where it
+# is configured (see qunibone-platform-env.sh); it cannot be told on the
+# commandline. So -u/-q here selects it there: that file is gitignored, local to
+# this machine and created by the scripts themselves, and rewriting it is the
+# only way -u/-q can mean anything for the software in the image. Announced
+# below, since it also changes what a later plain ./crossco builds.
+
+PLATFORM_ENV="$SCRIPT_DIR/qunibone-platform.env"
+PLATFORM_ENV_EXAMPLE="$PLATFORM_ENV.example"
+if [ ! -f "$PLATFORM_ENV_EXAMPLE" ]; then
+  echo "Error: missing $PLATFORM_ENV_EXAMPLE." >&2
+  exit 1
+fi
+
+# What it selects now: read through the same helper every build path uses, so a
+# legacy MAKE_QUNIBUS file is understood here too. Invalid or missing is not an
+# error, it is simply not the requested bus.
+CURRENT_PLATFORM=""
+if [ -f "$PLATFORM_ENV" ]; then
+  CURRENT_PLATFORM="$( . "$SCRIPT_DIR/qunibone-platform-env.sh" >/dev/null 2>&1 \
+                       && printf '%s' "$QUNIBONE_PLATFORM" )"
+fi
+if [ "$CURRENT_PLATFORM" = "$PLATFORM" ]; then
+  PLATFORM_ENV_CHANGES=0
+else
+  PLATFORM_ENV_CHANGES=1
+fi
+
+# The build runs as the user who invoked sudo: as root it would leave a tree of
+# root-owned object files behind, and the toolchain paths of crosscompile.env
+# are that user's ($HOME).
+BUILD_USER="$SUDO_USER"
+[ "$BUILD_USER" = "root" ] && BUILD_USER=""
+
+RELATIVE_DEMO="10.03_app_demo/4_deploy$SUFFIX/demo"
+DEMO_BINARY="$SCRIPT_DIR/$RELATIVE_DEMO"
+
+#################################################################
 # Input, output paths
 
 if [ ! -f "$SRC" ]; then
@@ -107,15 +179,8 @@ if [ ! -f "$SRC" ]; then
   exit 1
 fi
 
-STEM="$(basename "$SRC")"
-case "$STEM" in
-  *.dd)  STEM="${STEM%.dd}"  ;;
-  *.img) STEM="${STEM%.img}" ;;
-  *.raw) STEM="${STEM%.raw}" ;;
-esac
-
 OUTDIR="$SCRIPT_DIR/imgbuild"
-OUT="$OUTDIR/$STEM-clean.img"
+OUT="$OUTDIR/$IMAGE_NAME"
 # Built under a different name and renamed on success, so a failed or aborted
 # run never leaves a file that looks finished.
 TMPOUT="$OUT.partial"
@@ -201,9 +266,12 @@ fi
 # What will be removed from the image
 #
 # The QUniBone tree is installed directly into root's home directory, so these
-# are entries of /root. A separate script installs a freshly built tree.
+# are entries of /root. The capture's tree goes completely, including its .git:
+# the fresh one installed below must not be merged with the checkout of the
+# machine the card came from. "prepare-base-image" is this script's own former
+# name, and is on the list because a capture may predate the rename.
 
-DELETE_DIRS="01.01_pcb 01.02_panel 10.01_base 10.02_devices 10.03_app_demo
+DELETE_DIRS=".git 01.01_pcb 01.02_panel 10.01_base 10.02_devices 10.03_app_demo
              10.04_device_exerciser 10.05_cputest 90_common"
 
 DELETE_FILES="compile.sh cleanup.sh demo.sh github-sync.sh qunibone-platform.sh
@@ -211,16 +279,19 @@ DELETE_FILES="compile.sh cleanup.sh demo.sh github-sync.sh qunibone-platform.sh
               profile.example qunibone-platform.env qunibone-platform.env.example
               compile-bbb.env compile-x64.env copyright_header.c LICENSE
               README.md CHANGES.md COMPILING.md IMPROVEMENTS.md CLAUDE.md
-              crossco deploy-bbb debug-bbb master.tar.gz"
+              crossco deploy-bbb debug-bbb build-sdcard-image
+              prepare-base-image master.tar.gz"
 
 # 02_bbb_config is not removed as a whole: 03_debian-8.10.0-armhf (the apt
 # mirror config) exists only on a card, nowhere in this repository.
 DELETE_SUBDIRS="02_bbb_config/01_cape"
 
-echo "Preparing a distribution base image."
+echo "Preparing a $BOARD distribution image."
 echo
 echo "  Source        $SRC ($((SRCBYTES / 1024 / 1024)) MiB)"
 echo "  Partition 1   start $START, $SIZE sectors, type 83, bootable, ext4"
+echo "  Bus           $PLATFORM ($BOARD), tree suffix $SUFFIX"
+echo "  Software      $SCRIPT_DIR"
 echo "  Output        $OUT"
 echo
 echo "It removes the QUniBone software tree from /root of the image:"
@@ -232,6 +303,20 @@ echo "  (apt mirror config), cape.eeprom and root's own dotfiles: none of those"
 echo "  can be rebuilt from this repository."
 echo "It scrubs machine identity: ssh host keys, network and connman config,"
 echo "  dhcp leases, random seed, logs, shell histories, apt cache."
+echo "It then release builds this checkout for $PLATFORM with ./crossco -a -r and"
+echo "  installs it into /root, .git included, personalized for $BOARD:"
+echo "  5_applications$SUFFIX merged into 5_applications, 4_deploy -> 4_deploy$SUFFIX,"
+echo "  and the ~/*.sh example links recreated."
+if [ "$PLATFORM_ENV_CHANGES" -eq 1 ]; then
+  echo "  qunibone-platform.env selects ${CURRENT_PLATFORM:-nothing valid} and will be set to"
+  echo "  QUNIBONE_PLATFORM=$PLATFORM - that is also what a later ./crossco builds."
+fi
+if [ -z "$BUILD_USER" ]; then
+  echo "  SUDO_USER is not set, so the build runs as root and leaves root-owned"
+  echo "  build output in $SCRIPT_DIR."
+else
+  echo "  The build itself runs as $BUILD_USER, not as root."
+fi
 echo "It shrinks the filesystem to its minimum plus $SLACK_MIB MiB and zeroes the"
 echo "  remaining free space, and installs $GROW_UNIT_NAME,"
 echo "  which grows the card back on the first boot and reboots once."
@@ -243,6 +328,56 @@ if [ "$ASSUME_YES" -eq 0 ]; then
     echo "OK, abort."
     exit 1
   fi
+fi
+
+#################################################################
+# Build the software that goes into the image
+#
+# Before the image is touched: a build failure then costs nothing, instead of
+# arriving after minutes of copying and checking.
+
+if [ "$PLATFORM_ENV_CHANGES" -eq 1 ]; then
+  echo
+  echo "Setting QUNIBONE_PLATFORM=$PLATFORM in qunibone-platform.env ..."
+  # Rebuilt from the example, so the file keeps its documentation and holds
+  # exactly one setting - no commented-out second platform to misread later.
+  {
+    sed -e '/^[[:space:]]*#*[[:space:]]*QUNIBONE_PLATFORM=/d' \
+        -e '/^[[:space:]]*#*[[:space:]]*MAKE_QUNIBUS=/d' "$PLATFORM_ENV_EXAMPLE"
+    echo "QUNIBONE_PLATFORM=$PLATFORM"
+  } > "$PLATFORM_ENV" || exit 1
+  if [ -n "$SUDO_UID" ] && [ -n "$SUDO_GID" ]; then
+    chown "$SUDO_UID:$SUDO_GID" "$PLATFORM_ENV" || exit 1
+  fi
+fi
+
+echo
+echo "Release building $SCRIPT_DIR for $PLATFORM ..."
+# -a is not optional: make does not know that MAKE_CONFIGURATION changed, so an
+# incremental build after a DBG one would relink the old debug objects and call
+# the result a release build. -r is the release configuration itself.
+if [ -n "$BUILD_USER" ]; then
+  sudo -u "$BUILD_USER" -H "$SCRIPT_DIR/crossco" -a -r
+else
+  "$SCRIPT_DIR/crossco" -a -r
+fi
+if [ $? -ne 0 ]; then
+  echo "Error: the release build failed; $OUT was not written." >&2
+  exit 1
+fi
+
+if [ ! -x "$DEMO_BINARY" ]; then
+  echo "Error: the build produced no $RELATIVE_DEMO." >&2
+  exit 1
+fi
+# e_machine of the ELF header: 40 is ARM. Catches a crosscompile.env whose
+# BBB_CC is the host compiler, which builds and links happily and would ship an
+# x86 binary in an armhf image.
+ELF_MACHINE="$(od -An -tu2 -j18 -N2 "$DEMO_BINARY" 2>/dev/null | tr -d ' ')"
+if [ "$ELF_MACHINE" != "40" ]; then
+  echo "Error: $RELATIVE_DEMO is not an ARM binary (ELF e_machine $ELF_MACHINE, expected 40)." >&2
+  echo "Check BBB_CC and GCC_ROOT in crosscompile.env." >&2
+  exit 1
 fi
 
 #################################################################
@@ -379,7 +514,7 @@ run_e2fsck "$LOOPDEV" "as captured"
 #################################################################
 # Mount and strip
 
-MNT="$(mktemp -d /tmp/prepare-base-image.XXXXXX)" || exit 1
+MNT="$(mktemp -d /tmp/build-sdcard-image.XXXXXX)" || exit 1
 mount -t ext4 -o rw,noatime,nodev,nosuid "$LOOPDEV" "$MNT" || exit 1
 
 if ! mountpoint -q "$MNT" ; then
@@ -420,15 +555,6 @@ SYMLINKS=0
 for d in $DELETE_DIRS ; do
   n="$(find "$MNT/root" -maxdepth 1 -type l -lname "/root/$d/*" -print -delete | wc -l)"
   SYMLINKS=$((SYMLINKS + n))
-done
-
-# Report - never delete - anything else in /root left pointing nowhere.
-for l in "$MNT"/root/* ; do
-  [ -L "$l" ] || continue
-  t="$(readlink "$l")"
-  case "$t" in
-    /*) [ -e "$MNT$t" ] || echo "  Note: $(basename "$l") still links to $t, which the image does not have." ;;
-  esac
 done
 
 #################################################################
@@ -502,8 +628,131 @@ ln -sfn "../$GROW_UNIT_NAME" \
         "$(img_path "/etc/systemd/system/multi-user.target.wants/$GROW_UNIT_NAME")" || exit 1
 
 sync
+USED_STRIPPED="$(df -P -k "$MNT" | awk 'NR==2 {print $3}')"
+FREED_MIB=$(( (USED_BEFORE - USED_STRIPPED) / 1024 ))
+
+#################################################################
+# Install the freshly built tree into /root
+#
+# Before the shrink, not after: here the filesystem is still the size of the
+# captured card, while afterwards it holds only $SLACK_MIB MiB of free space -
+# far less than the tree needs.
+
+echo
+echo "Installing the QUniBone tree into /root ..."
+
+ROOT="$(img_path /root)" || exit 1
+
+# What of this checkout does not belong on a board.
+#   imgbuild            the images this script writes, including this one
+#   91_3rd_party        the image's own copy is the one that cannot be rebuilt
+#                       from a checkout - it is on the keep list for that reason
+#   crosscompile.env    x64 toolchain paths of the build host
+#   compile_commands.json  the same paths, for this host's IDE
+#   10.05_cputest/4_deploy, 90_common/4_deploy
+#                       the test binaries, built by and for the HOST compiler
+#   *.o                 cross compiled objects; "demo" itself is installed, and
+#                       a rebuild on the board makes its own
+#   4_deploy<other>, 5_applications<other>
+#                       the other bus: its "demo" would be the wrong binary to
+#                       find in the image, its examples are deleted below anyway
+#   .idea .vscode ...   editor and IDE state of the build host
+TREE_EXCLUDES=(
+  "--exclude=./imgbuild"
+  "--exclude=./91_3rd_party"
+  "--exclude=./crosscompile.env"
+  "--exclude=./compile_commands.json"
+  "--exclude=./.idea"
+  "--exclude=./.vscode"
+  "--exclude=./.claude"
+  "--exclude=./.metadata"
+  "--exclude=./.settings"
+  "--exclude=./cmake-build-debug"
+  "--exclude=./10.05_cputest/4_deploy"
+  "--exclude=./90_common/4_deploy"
+  "--exclude=./10.03_app_demo/4_deploy$OTHER_SUFFIX"
+  "--exclude=./10.03_app_demo/5_applications$OTHER_SUFFIX"
+  "--exclude=*.o"
+  "--exclude=*.log"
+)
+
+# Same exclusions, and from the same directory, so this is the size that will
+# actually be written.
+TREE_KB="$(cd "$SCRIPT_DIR" && du -s -k "${TREE_EXCLUDES[@]}" . | awk '{print $1}')"
+AVAIL_KB="$(df -P -k "$MNT" | awk 'NR==2 {print $4}')"
+case "$TREE_KB$AVAIL_KB" in
+  ''|*[!0-9]*) echo "Error: could not size the tree or the free space in the image." >&2 ; exit 1 ;;
+esac
+if [ "$TREE_KB" -ge "$AVAIL_KB" ]; then
+  echo "Error: the tree needs $((TREE_KB / 1024)) MiB, the image has $((AVAIL_KB / 1024)) MiB free." >&2
+  echo "The capture is too small to hold the software as well." >&2
+  exit 1
+fi
+
+# tar rather than cp: one exclude list, and it copies the tree as it is -
+# symlinks, permissions, .git and all. --no-same-owner makes everything root's,
+# which is what /root of a board looks like; the build host's uid means nothing
+# there.
+tar -C "$SCRIPT_DIR" "${TREE_EXCLUDES[@]}" -cf - . \
+  | tar -C "$ROOT" --no-same-owner -xf -
+TARSTATUS=("${PIPESTATUS[@]}")
+if [ "${TARSTATUS[0]}" -ne 0 ] || [ "${TARSTATUS[1]}" -ne 0 ]; then
+  echo "Error: copying the tree into the image failed (tar read ${TARSTATUS[0]}, write ${TARSTATUS[1]})." >&2
+  exit 1
+fi
+
+if [ ! -x "$ROOT/$RELATIVE_DEMO" ]; then
+  echo "Error: internal, $RELATIVE_DEMO did not arrive in the image." >&2
+  exit 1
+fi
+
+#################################################################
+# Personalize the installed tree for this bus
+#
+# What qunibone-platform.sh does on a running board, done here instead: it
+# works on $HOME and would write this host's mount path into every link it
+# creates, so it cannot simply be called on a mounted image.
+
+echo "Personalizing the tree for $BOARD ..."
+
+# The examples: the bus-specific tree is merged into the common one, and both
+# bus trees then disappear - an installed board has a single 5_applications.
+APPDIR="$ROOT/10.03_app_demo/5_applications"
+mkdir -p "$APPDIR" || exit 1
+if [ -d "$APPDIR$SUFFIX" ]; then
+  # "/." not "/*": copies dot files too and does not fail on an empty directory
+  cp -f -a "$APPDIR$SUFFIX/." "$APPDIR" || exit 1
+fi
+rm -rf "$APPDIR"_u "$APPDIR"_q || exit 1
+
+# 4_deploy -> 4_deploy_u|_q, the path demo.sh and the makefiles use. Written as
+# the absolute in-image target the board itself would create.
+ln -sfn "/root/10.03_app_demo/4_deploy$SUFFIX" "$ROOT/10.03_app_demo/4_deploy" || exit 1
+
+# The ~/*.sh shortcuts to the example scripts, again with in-image targets.
+APPLINKS=0
+while IFS= read -r s ; do
+  ln -sfn "${s#$MNT}" "$ROOT/$(basename "$s")" || exit 1
+  APPLINKS=$((APPLINKS + 1))
+done < <(find "$APPDIR" -name '*.sh' -type f)
+
+# The remaining step of qunibone-platform.sh: every shell script executable.
+find "$ROOT" -xdev -name '*.sh' -type f -exec chmod +x {} + || exit 1
+
+# Report - never delete - anything in /root left pointing nowhere. An absolute
+# link target is resolved against the HOST's root here, so it is checked by
+# hand against $MNT.
+for l in "$ROOT"/* ; do
+  [ -L "$l" ] || continue
+  t="$(readlink "$l")"
+  case "$t" in
+    /*) [ -e "$MNT$t" ] || echo "  Note: $(basename "$l") links to $t, which the image does not have." ;;
+  esac
+done
+
+sync
 USED_AFTER="$(df -P -k "$MNT" | awk 'NR==2 {print $3}')"
-FREED_MIB=$(( (USED_BEFORE - USED_AFTER) / 1024 ))
+INSTALLED_MIB=$(( (USED_AFTER - USED_STRIPPED) / 1024 ))
 
 umount "$MNT" || exit 1
 rmdir "$MNT" ; MNT=""
@@ -548,7 +797,7 @@ esac
 
 echo
 echo "Zeroing the free space ..."
-MNT="$(mktemp -d /tmp/prepare-base-image.XXXXXX)" || exit 1
+MNT="$(mktemp -d /tmp/build-sdcard-image.XXXXXX)" || exit 1
 mount -t ext4 -o rw,noatime,nodev,nosuid "$LOOPDEV" "$MNT" || exit 1
 mountpoint -q "$MNT" || { echo "Error: internal, $MNT is not a mount point." >&2 ; exit 1 ; }
 # Runs as root, so this fills the reserved blocks too. Running out of space is
@@ -623,8 +872,9 @@ USEDBLK="$(dumpe2fs -h "$OUT?offset=$((START * 512))" 2>/dev/null \
            | awk '/^Block count:/ {c = $3} /^Free blocks:/ {f = $3} END {print c - f}')"
 
 echo
-echo "Base image: $OUT"
+echo "$BOARD image: $OUT"
 echo "  Source          $SRC ($((SRCBYTES / 1024 / 1024)) MiB)"
+echo "  Bus             $PLATFORM ($BOARD)"
 echo "  Partition 1     start $NEWSTART (unchanged), $NEWSECT sectors, type 83, bootable"
 echo "  Boot area       sectors 0..$((START - 1)) preserved byte for byte (MLO, u-boot)"
 echo "  Filesystem      ext4, $BLKSZ byte blocks, $USEDBLK of $NEW blocks used"
@@ -635,6 +885,9 @@ if [ -n "$MISSING" ]; then
 fi
 echo "  Scrubbed        ssh host keys (regenerated on boot), network and connman"
 echo "                  config, dhcp leases, random seed, logs, histories, apt cache"
+echo "  Installed       $SCRIPT_DIR, release built for $PLATFORM"
+echo "                  $INSTALLED_MIB MiB in /root, .git included, $APPLINKS example links"
+echo "                  4_deploy -> 4_deploy$SUFFIX, 5_applications$SUFFIX merged into 5_applications"
 echo "  First boot      $GROW_UNIT_NAME grows the card, then reboots once"
 echo "                  marker $GROW_MARKER"
 echo "  Image size      $((OUTBYTES / 1024 / 1024)) MiB, filesystem clean"

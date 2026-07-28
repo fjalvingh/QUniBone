@@ -9,6 +9,7 @@ compile_commands.json
 crosscompile.env
 qunibone-platform.env
 **/4_deploy_u/**
+**/4_deploy_q/**
 10.05_cputest/4_deploy/
 90_common/4_deploy/
 *.log

@@ -128,7 +128,7 @@ The background task's `endsPattern` matches gdbserver's own `Listening on port` 
 knows the remote debugger is ready before it attaches. With this in place, hitting F5 rebuilds,
 redeploys, starts `gdbserver` on the BBB, and attaches — one step instead of four.
 
-## Building a distribution base image
+## Building a distribution image
 
 A UniBone/QBone distribution starts from a raw `dd` capture of a working BeagleBone SD card, because
 that card is the only place some of the setup exists: the Debian armhf userland, the PRU toolchain
@@ -137,27 +137,65 @@ in `91_3rd_party/` (gitignored), and the `files.retrocmp.com` apt mirror config 
 distributable — it is the size of the whole card, and it carries one machine's identity plus one
 day's build of the software tree.
 
-`prepare-base-image` reduces such a capture to the part worth distributing:
+`build-sdcard-image` reduces such a capture to the part worth distributing and installs a freshly
+built software tree on it. The bus is mandatory and decides everything: the name of the result, what
+the software is built for, and how the installed tree is personalized.
 
 ```bash
-sudo ./prepare-base-image ~/Downloads/sdcard_qbone_2025_06_09.dd
-sudo ./prepare-base-image -f <image>      # overwrite an existing imgbuild/<stem>-clean.img
-sudo ./prepare-base-image -y <image>      # do not ask for confirmation
-sudo ./prepare-base-image -k <image>      # keep /var/lib/apt/lists (default: emptied)
-sudo ./prepare-base-image -s 500 <image>  # free space in MiB above the filesystem minimum (default 300)
+sudo ./build-sdcard-image -q ~/Downloads/sdcard_qbone_2025_06_09.dd   # -> imgbuild/qbone-empty.img
+sudo ./build-sdcard-image -u ~/Downloads/sdcard_unibone.dd            # -> imgbuild/unibone-empty.img
+sudo ./build-sdcard-image -q -f <image>      # overwrite an existing output image
+sudo ./build-sdcard-image -q -y <image>      # do not ask for confirmation
+sudo ./build-sdcard-image -q -k <image>      # keep /var/lib/apt/lists (default: emptied)
+sudo ./build-sdcard-image -q -s 500 <image>  # free space in MiB above the filesystem minimum (default 300)
 ```
 
-The result is `imgbuild/<stem>-clean.img`, where `<stem>` is the capture's name without a trailing
-`.dd`/`.img`/`.raw`. `imgbuild/` is gitignored, and the finished image is chowned back to the user
-who invoked `sudo`. The input file is never modified. Root is required for `losetup`/`mount`/
-`e2fsck`; the script says so rather than re-invoking itself under `sudo`. During the run it needs
-free space for a copy of everything up to the end of the partition — about 15 GB for a 16 GB card.
+The result is `imgbuild/qbone-empty.img` or `imgbuild/unibone-empty.img`. `imgbuild/` is gitignored,
+and the finished image is chowned back to the user who invoked `sudo`. The input file is never
+modified. Root is required for `losetup`/`mount`/`e2fsck`; the script says so rather than re-invoking
+itself under `sudo`. During the run it needs free space for a copy of everything up to the end of the
+partition — about 15 GB for a 16 GB card.
 
-It removes the QUniBone tree from `/root` (a separate script installs a freshly built one), scrubs
-machine-specific state, shrinks the filesystem and the partition, and zeroes the free space so the
-image compresses to roughly its content. What it deliberately **keeps** is everything that cannot be
-rebuilt from this repository: `91_3rd_party/`, `02_bbb_config/03_debian-8.10.0-armhf/`,
+It removes the QUniBone tree from `/root` — including the capture's `.git`, so the fresh checkout is
+never merged with the one from the machine the card came from — scrubs machine-specific state,
+installs the software (below), shrinks the filesystem and the partition, and zeroes the free space so
+the image compresses to roughly its content. What it deliberately **keeps** is everything that cannot
+be rebuilt from this repository: `91_3rd_party/`, `02_bbb_config/03_debian-8.10.0-armhf/`,
 `cape.eeprom` and root's own dotfiles.
+
+### What gets installed, and by whom
+
+Before the image is touched, the script release builds *this checkout* with `./crossco -a -r`. `-a`
+is not a nicety: `make` does not know that `MAKE_CONFIGURATION` changed, so an incremental build
+after a `DBG` one would relink the old debug objects and call the result a release build. The
+automated tests run as part of it, so a broken tree cannot become an image. The build runs as
+`$SUDO_USER`, not as root, since as root it would leave a tree of root-owned object files behind and
+would look for the toolchain under root's `$HOME`.
+
+`./crossco` takes the bus from `qunibone-platform.env` — the single place where it is configured —
+and cannot be told on the commandline, so `-u`/`-q` **rewrites that file**. It is gitignored, local
+to the machine and created by the scripts themselves; rewriting it is the only way `-u`/`-q` can mean
+anything for the software in the image. The script says so before it does it, and the setting stays,
+so a later plain `./crossco` builds for the same bus.
+
+The whole checkout is then copied into `/root` of the image, `.git` included, and personalized
+exactly as `qunibone-platform.sh` does on a running board: `5_applications_u|_q` merged into
+`5_applications` and both bus trees removed, `4_deploy` linked to `4_deploy_u|_q`, the `~/*.sh`
+shortcuts to the example scripts recreated, and every `*.sh` made executable. `qunibone-platform.sh`
+itself cannot be used for this: it works on `$HOME` and would write the build host's temporary mount
+path into every link it creates.
+
+Not copied: `imgbuild/` (the images themselves), `91_3rd_party/` (the image's own copy is the one
+that cannot be rebuilt from a checkout), `crosscompile.env` and `compile_commands.json` (paths of the
+build host), the host-compiled test binaries in `10.05_cputest/4_deploy` and `90_common/4_deploy`,
+all `*.o` (a rebuild on the board makes its own), IDE directories, and the other bus's `4_deploy` and
+`5_applications` trees. `demo` is checked to be an ARM binary before it goes in, which catches a
+`crosscompile.env` whose `BBB_CC` is the host compiler.
+
+Because the installed tree is personalized, `git status` in the image is not clean: the merged and
+removed `5_applications` trees show up as deletions, and the `chmod +x` shows up as mode changes.
+That is what an installed board looks like; the `.git` is there to make the software's origin
+traceable and updatable, not to be a pristine worktree.
 
 The image grows itself back to the whole card on the first boot, via
 `qunibone-firstboot-grow.service` (installed from `02_bbb_config/04_base_image/`). That happens in
